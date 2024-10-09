@@ -3,11 +3,17 @@
 Mam problemy z asynchronnicznością JS - callbacki itd. Na razie wygląda na dzialające, ale nie wiem czy za bardzo nei 
 dopasowałem się do małego narazie problemu. Jeśli masz sugestie poprawek to napisz lub popraw!
 
-
 */
 
 const Sqlite3 = require('sqlite3').verbose();
 const Crypto = require('crypto');
+
+var KEY_ALGO = "rsa"
+var KEY_MODULUS_LEN = 4096
+var KEY_FORMAT = "pem"
+var PK_TYPE = "spki"
+var SK_TYPE = "pkcs8"
+var SK_CIPHER = 'aes-256-cbc'
 
 /* DB SECTION */
 function connect_db (/*int*/port, _callback){
@@ -83,16 +89,16 @@ function print_identities(db, _callback){
 /* ASYM KEYS SECTION */
 function register(db, /*string*/name, /*string*/password, _callback) {
     //Creates keypair and saves to wallet
-    Crypto.generateKeyPair('rsa', {
-        modulusLength: 4096,
+    Crypto.generateKeyPair(KEY_ALGO, {
+        modulusLength: KEY_MODULUS_LEN,
         publicKeyEncoding: {
-          type: 'spki',
-          format: 'pem'
+          type: PK_TYPE,
+          format: KEY_FORMAT
         },
         privateKeyEncoding: {
-          type: 'pkcs8',
-          format: 'pem',
-          cipher: 'aes-256-cbc',
+          type: SK_TYPE,
+          format: KEY_FORMAT,
+          cipher: SK_CIPHER,
           passphrase: password
         }
       }, (err, publicKey, privateKey) => {
@@ -105,15 +111,15 @@ function login(db, /*string*/name, /*string*/password, _callback){
     load_identity(db, name, (id, /*str*/pk, /*str*/sk) => {
         var publicKey = Crypto.createPublicKey({
             'key': pk,
-            'format': 'pem',
-            'type': 'spki'
+            'format': KEY_FORMAT,
+            'type': PK_TYPE
         });
         try{
             var privateKey = Crypto.createPrivateKey({
                 'key': sk,
-                'format': 'pem',
-                'type': 'pkcs8',
-                'cipher': 'aes-256-cbc',
+                'format': KEY_FORMAT,
+                'type': SK_TYPE,
+                'cipher': SK_CIPHER,
                 'passphrase': password
             });
         } catch (error){
