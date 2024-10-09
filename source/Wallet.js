@@ -6,9 +6,6 @@ dopasowałem się do małego narazie problemu. Jeśli masz sugestie poprawek to 
 
 */
 
-
-
-
 const Sqlite3 = require('sqlite3').verbose();
 const Crypto = require('crypto');
 
@@ -42,6 +39,8 @@ function remove_wallet (db, _callback) {
 function save_identity(db, name, publicKey, privateKey, _callback) {
     db.get(`SELECT * From Identities WHERE name='${name}'`, (err, row) => {
         if (row==undefined) {
+            /* W druga kolumne powinien byc wstawiany hash a nie publickey (tymczasowe rozwiazanie)*/
+            //TODO insert hash
             db.run(`INSERT INTO Identities VALUES ('${name}', '${publicKey}', '${publicKey}', '${privateKey}')`)
             console.log(`Identity ${name} created`)
             if (_callback){
@@ -55,7 +54,8 @@ function save_identity(db, name, publicKey, privateKey, _callback) {
     
 }
 
-function load_identity(db, name, _callback){
+function load_identity(db, /*string*/name, _callback){
+    //Loads identity from db by name
     db.get(`SELECT * From Identities WHERE name='${name}'`, (err, row) => {
         if (row==undefined) {
             throw new Error("Identity not found")
@@ -71,7 +71,7 @@ function load_identity(db, name, _callback){
 }
 
 function print_identities(db, _callback){
-    /*To debug*/
+    /*Debug tool*/
     db.all("SELECT * FROM Identities", (err,rows) => {
         console.log(rows)
         if (_callback){
@@ -82,6 +82,7 @@ function print_identities(db, _callback){
 
 /* ASYM KEYS SECTION */
 function register(db, /*string*/name, /*string*/password, _callback) {
+    //Creates keypair and saves to wallet
     Crypto.generateKeyPair('rsa', {
         modulusLength: 4096,
         publicKeyEncoding: {
@@ -95,12 +96,13 @@ function register(db, /*string*/name, /*string*/password, _callback) {
           passphrase: password
         }
       }, (err, publicKey, privateKey) => {
-        // Handle errors and use the generated key pair.
         save_identity(db, name, publicKey, privateKey, _callback)
       });   
 }
-function login(db, name, password, _callback){
-    load_identity(db, name, (id, pk, sk) => {
+function login(db, /*string*/name, /*string*/password, _callback){
+    //Loads keys from wallet and creates key objects
+    //TODO sprawdzanie bledow z haslem itp.
+    load_identity(db, name, (id, /*str*/pk, /*str*/sk) => {
         var publicKey = Crypto.createPublicKey({
             'key': pk,
             'format': 'pem',
@@ -130,7 +132,7 @@ function login(db, name, password, _callback){
 
 
 /* Testy troche na szybko */
-port = 5000
+port = 5000 //port potrzebny, bo kiedys ten portfel bedzie na serwerze - port reprezentuje uzytkownika :)
 connect_db(port, (db) => {
     remove_wallet(db, () => {
         create_wallet(db, () => {
