@@ -7,6 +7,8 @@ dopasowałem się do małego narazie problemu. Jeśli masz sugestie poprawek to 
 
 const Sqlite3 = require('sqlite3').verbose();
 const Crypto = require('crypto');
+
+
 const fs = require('fs');
 
 var KEY_ALGO = "rsa"
@@ -52,7 +54,24 @@ function create_wallet (db, _callback) {
         
     });
 }
-function remove_wallet (db, _callback) {
+exports.load_wallet = function (port, _callback, recreate=false) {
+    //Load and create if needed, possible to recreate
+    connect_db(port, (db) => {
+        if (recreate) {
+            remove_wallet(db)
+        }
+        create_wallet(db, () => {
+            if (_callback) {
+                _callback(db)
+            } else {
+                return db
+            }  
+        })
+    })
+}
+
+
+var remove_wallet = exports.remove_wallet = function (db, _callback) {
     db.run('DROP TABLE if exists Identities', (err) => {
         if (err){
             console.log(err)
@@ -105,7 +124,7 @@ function load_identity(db, /*string*/name, _callback){
     })
 }
 
-function print_identities(db, _callback){
+var print_identities = exports.print_identities = function (db, _callback){
     /*Debug tool*/
     db.all("SELECT * FROM Identities", (err,rows) => {
         console.log(rows)
@@ -116,7 +135,7 @@ function print_identities(db, _callback){
 }
 
 /* ASYM KEYS SECTION */
-function register(db, /*string*/name, /*string*/password, _callback) {
+exports.register =  function (db, /*string*/name, /*string*/password, _callback) {
     //Creates keypair and saves to wallet
     Crypto.generateKeyPair(KEY_ALGO, {
         modulusLength: KEY_MODULUS_LEN,
@@ -134,7 +153,7 @@ function register(db, /*string*/name, /*string*/password, _callback) {
         save_identity(db, name, publicKey, privateKey, _callback)
       });   
 }
-function login(db, /*string*/name, /*string*/password, _callback){
+exports.login = function (db, /*string*/name, /*string*/password, _callback){
     //Loads keys from wallet and creates key objects
     //TODO sprawdzanie bledow z haslem itp.
     load_identity(db, name, (id, /*str*/pk, /*str*/sk) => {
@@ -164,25 +183,3 @@ function login(db, /*string*/name, /*string*/password, _callback){
     })
     
 }
-
-
-/* Testy troche na szybko */
-port = 5000 //port potrzebny, bo kiedys ten portfel bedzie na serwerze - port reprezentuje uzytkownika :)
-connect_db(port, (db) => {
-    remove_wallet(db, () => {
-        create_wallet(db, () => {
-            register(db, "carfund", "ilovecars", () => {
-                register(db, "main", "ilovemoney", () => {
-                    login(db, "carfund", "ilovecars", (id, pk, sk) => {
-                        console.log(id, pk)
-                        //print_identities(db)
-                        login(db, "main", "ilovemoney", () => {
-                            console.log(pk, sk)                          
-                        })
-                    })
-                })
-            })
-        })
-    })
-})
-
