@@ -4,7 +4,7 @@ Port necessary as parameter since each node should be represented by one unique 
 */
 
 const port = 5000
-const Wallet = require('./../Wallet')
+const Wallet = require('../source/Wallet')
 
 Wallet.load_wallet(port, (db) => {
         Wallet.register(db, "carfund", "ilovecars", () => {

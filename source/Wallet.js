@@ -3,6 +3,7 @@
 Mam problemy z asynchronnicznością JS - callbacki itd. Na razie wygląda na dzialające, ale nie wiem czy za bardzo nei 
 dopasowałem się do małego narazie problemu. Jeśli masz sugestie poprawek to napisz lub popraw!
 
+Warning: Before release consider changing method of obtaining wallet db path in connect_db (currently standarized to be in source)
 */
 
 const Sqlite3 = require('sqlite3').verbose();
@@ -24,7 +25,9 @@ var VERBOSE = true
 
 /* DB SECTION */
 function connect_db (/*int*/port, _callback){
-    dir = "./data/" + port + "/"
+    console.log(__dirname)
+    //Standarize data location for development
+    dir = __dirname + "/data/" + port + "/"
     db_path = dir + port + ".db"
 
     //https://stackoverflow.com/questions/21194934/how-to-create-a-directory-if-it-doesnt-exist-using-node-js
