@@ -7,6 +7,7 @@ dopasowałem się do małego narazie problemu. Jeśli masz sugestie poprawek to 
 
 const Sqlite3 = require('sqlite3').verbose();
 const Crypto = require('crypto');
+const fs = require('fs');
 
 var KEY_ALGO = "rsa"
 var KEY_MODULUS_LEN = 4096
@@ -15,10 +16,20 @@ var PK_TYPE = "spki"
 var SK_TYPE = "pkcs8"
 var SK_CIPHER = 'aes-256-cbc'
 
+var HASH_ALGO = 'sha256'
+
+var VERBOSE = true
+
 /* DB SECTION */
 function connect_db (/*int*/port, _callback){
-    db_path = "./data/" + port + "/" + port + ".db"
-    //TODO sprawdz czy jest odpowiedni podfolder w data i utworz jesli trzeba!
+    dir = "./data/" + port + "/"
+    db_path = dir + port + ".db"
+
+    //https://stackoverflow.com/questions/21194934/how-to-create-a-directory-if-it-doesnt-exist-using-node-js
+    if (!fs.existsSync(dir)){
+        if (VERBOSE) { console.log("Directory for port not found. Creating...") }
+        fs.mkdirSync(dir, {recursive: true});
+    }
     const db = new Sqlite3.Database(db_path, Sqlite3.OPEN_CREATE | Sqlite3.OPEN_READWRITE);
     if (_callback){
         _callback(db)
@@ -28,16 +39,29 @@ function connect_db (/*int*/port, _callback){
 }
 
 function create_wallet (db, _callback) {
-    db.run(`CREATE TABLE if not exists Identities (name TEXT, id TEXT, pk TEXT, sk TEXT)`, () => {
-        if (_callback){
-            _callback()
+    db.run(`CREATE TABLE if not exists Identities (name TEXT, id TEXT, pk TEXT, sk TEXT)`, (err) => {
+        if (err){
+            console.log(err)
+            throw new Error("Something went wrong during wallet creation")
+        } else {
+            if (VERBOSE) { console.log("Making sure wallet exists...")}
+            if (_callback){
+                _callback()
+            }
         }
+        
     });
 }
 function remove_wallet (db, _callback) {
-    db.run('DROP TABLE if exists Identities', () => {
-        if (_callback){
-            _callback()
+    db.run('DROP TABLE if exists Identities', (err) => {
+        if (err){
+            console.log(err)
+            throw new Error("Something went wrong during wallet removal")
+        } else {
+            if (VERBOSE) { console.log("Removing wallet...")}
+            if (_callback){
+                _callback()
+            }
         }
     });
 }
@@ -45,10 +69,15 @@ function remove_wallet (db, _callback) {
 function save_identity(db, name, publicKey, privateKey, _callback) {
     db.get(`SELECT * From Identities WHERE name='${name}'`, (err, row) => {
         if (row==undefined) {
-            /* W druga kolumne powinien byc wstawiany hash a nie publickey (tymczasowe rozwiazanie)*/
-            //TODO insert hash
-            db.run(`INSERT INTO Identities VALUES ('${name}', '${publicKey}', '${publicKey}', '${privateKey}')`)
-            console.log(`Identity ${name} created`)
+            if (err != null){
+                console.log(err)
+                throw new Error("Error encountered during saving identity")
+            }
+            //No name verification - assumes user doesn't want to destroy his own wallet
+            let id = Crypto.createHash(HASH_ALGO).update(publicKey).digest('hex');
+            //TODO Handle errors?
+            db.run(`INSERT INTO Identities VALUES ('${name}', '${id}', '${publicKey}', '${privateKey}')`)
+            if (VERBOSE) { console.log(`Identity ${name} succesfully created.`) }
             if (_callback){
                 _callback();
             }
@@ -66,7 +95,7 @@ function load_identity(db, /*string*/name, _callback){
         if (row==undefined) {
             throw new Error("Identity not found")
         } else {
-            console.log(`Loading identity ${row['name']} ...`)
+            if (VERBOSE) { console.log(`Loading identity ${row['name']} ...`) }
             if (_callback){
                 _callback(row['id'],row['pk'],row['sk'])
             } else {
@@ -126,7 +155,7 @@ function login(db, /*string*/name, /*string*/password, _callback){
             console.log("Invalid credentials")
             return
         }  
-        console.log("LOGIN: Login succesful")
+        if (VERBOSE) { console.log("Login succesful.") }
         if (_callback){
             _callback(id, publicKey, privateKey)
         } else {
@@ -145,7 +174,7 @@ connect_db(port, (db) => {
             register(db, "carfund", "ilovecars", () => {
                 register(db, "main", "ilovemoney", () => {
                     login(db, "carfund", "ilovecars", (id, pk, sk) => {
-                        console.log(pk, sk)
+                        console.log(id, pk)
                         //print_identities(db)
                         login(db, "main", "ilovemoney", () => {
                             console.log(pk, sk)                          
