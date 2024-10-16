@@ -183,8 +183,41 @@ function send_message(url, data, _callback, broadcast=false, save_message=false)
         .then(function (data) {
             _callback(resp_status, data)
         })
+        .catch( (err) => {
+            console.log(err)
+            console.warn(`Can't connect to ${url}`)
+            
+        })
 }
 
+app.get('/test_connection', (req, res) => {
+    /*
+    Test connection to every neighbor
+    */
+    console.log("Checking neighbors connection")
+    for (const neigh of Neighbors) {
+        let url = neigh + '/'
+        test_connection(url, (connected) => {
+            console.log(url, connected)
+        })
+    }
+    res.send("Test performed")
+});
+
+function test_connection(url, _callback){
+    /*
+    Test connection by simple fetch url
+    Use callback to react
+    */
+    fetch(url)
+    .then ((resp) => {
+        _callback(true)
+    })
+    .catch((err) => {
+        _callback(false)
+    })
+    
+}
 
 /*Input parameters*/
 var port = 5000;
