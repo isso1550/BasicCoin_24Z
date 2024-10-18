@@ -5,6 +5,7 @@ Sieć peer-to-peer i bezpieczny portfel (10p) (termin oddania: 22.10.2024 / 25.1
  * Uruchomienie i rejestracja węzła
 
 # Pomysł na rozwiązanie
+Dodano rozdziały dotyczące problemów utrzymania połączenia i spójności danych 18.10
 
 ## Cyfrowy portfel
 
@@ -57,6 +58,40 @@ Jeśli węzeł zostanie wyłączony poprawnie, a nie w skutek nagłego wypadku t
 Każdy węzeł powinien mieć możliwość rozpropagowania wiadomości w całej sieci. Aby to osiągnąć wysyła ją do każdego sąsiada, a ten do każdego swojego sąsiada itd... Aby uniknąć pętli proponuje razem z wiadomością przesyłać jej hash, aby węzeł po otrzymaniu mógł wstawić go do swojej listy "poprzednio otrzymanych newsów". Jeśli hash już jest w liście to węzeł ignoruje wiadomość - już ją słyszał. Hash lepiej przesyłać w żądaniu, a nie obliczać na biężąco, aby nie obciążać bardziej węzłów (chociaż może to właśnie ta bardziej ekonomiczna opcja? ale nie wydaje się - trzeba zbadać).
 
 W wiadomościach mogłaby się przydać informacja kto ją zapoczątkował.
+
+### Kontrolowane opuszczanie sieci - dodane 18.10
+Węzeł, który chce opuścić sieć powinien przekazać informacje o swoich połączeniach w taki sposób, aby zagwarantować że nie powstanie "dziura" w sieci po jego odejściu.
+
+Pomysł na rozwiązanie:
+
+Węzeł zgłasza opuszczenie sieci do najstarszego sąsiada (pierwszego w liście) (najstarszy jest najbardziej zaufany, bo już od dawna się z nim komunikuje). W wiadomości przekazuje mu listę swoich sąsiadów. Węzeł odbiorca sprawdza, czy otrzymana lista zawiera nieznane mu węzły: jeśli nie to odpowiada opuszczającemu "wszystkich już znam". Wtedy węzeł opuszczający próbuje tego samego z drugim najstarszym sąsiadem itd. aż do skutku. Jeśli węzeł odbiorca nie zna niektórych z otrzymanych sąsiadów to zapamiętuje ich i zwraca wiadomość "Zapamiętałem sąsiadów". W reakcji na tę wiadomość opuszczający rozsyła do wszystkich swoich sąsiadów adres tego węzła, aby mogły ustanowić dwustronne połączenie w celu propagowania wiadomości.
+
+Podejście nie jest optymalne i stworzy wiele nadmiarowych połączeń, ale na ten moment to jedyne co jestem w stanie wymyślić. Warto zbadać to dokładniej wykorzystując różne wykresy. Może się okazać, że jest sposób na znalezienie minimalnych połączeń do przekazania. Zwrócić uwagę na metody stosowane w teorii grafów, może wykorzystać jakoś mechanizm broadcast?
+
+
+### Nagłe opuszczanie sieci - dodane 18.10
+Węzeł, który w sposób nieoczekiwany opuści sieć może utworzyć "dziurę".
+
+Pomysł na rozwiązanie:
+
+
+Węzeł w reakcji na nieudane połączenie z sąsiadem przenosi jego adres z listy sąsiadów do listy "niepewnych" sąsiadów. Następnie sprawdza pare razy połączenie, sprawdza czy utracony sąsiad przypadkiem nie powrócił już po chwili. Jeśli wrócił to wysyła mu wiadomość "Witaj ponownie, możliwe że przegapiłeś jakieś wieści". Awaryjny węzeł w reakcji na tę informację odpytuje wysyłającego "W takim razie pokaż mi jakie wiadomości masz zapisane" (GET /messages). Po otrzymaniu wiadomości porównuje co go ominęło i wysyła broadcast dla nieznanych dotąd wiadomość, aby zaktualizować inne węzły w jego otoczeniu, które mogły być postronnymi ofiarami awarii. W sytuacji, gdy awaryjny węzeł był mostem między dwiema grupami węzłów to powinien otrzymać co najmniej dwie listy od obu podsieci i rozpropagować wiadomości z obu, co powinno ujednolicić stan sieci (w przypadku bloków i transakcji, gdzie kolejność i poprzednicy mają znaczenie może to być poważny problem, bo nie będzie to tak proste!!!).
+
+
+Wracając na początek: jeśli węzeł nie odzyska połączenia do sąsiada to całkowicie go zapomina. Tworzy to problem opisany w kolejnym mini rozdziale.
+
+### Zapobieganie tworzenia się podsieci - dodane 18.10
+Kiedy węzeł "most" między dwiema grupami węzłów ulegnie trwałej awarii to utworzą się dwie podsieci żyjące swoim życiem.
+
+
+Pomysł na rozwiązanie:
+
+
+Węzeł INIT/Genesis raz na jakiś czas powinień wysłać wiadomość broadcast o treści "Cześć, potwierdzam że twoje połączenie z siecią jest poprawne". Czas, co jaki jest wysyłane takie powiadomienie powinien być stały i znany każdemu węzłowi. Dzięki temu jeśli taki czas wynosi np. 1 minuta to każdy węzeł po np. 2 minutach (ważne, żeby ustalić po jakim czasie podejmowane są działania, w gre wchodzą opóźnienia w przesyłaniu!) zorientuje się "Od dawna nie dostałem potwierdzenia, czy ja jestem w sieci?". W reakcji na takie spostrzeżenie wyświetli komunikat proszący użytkownika o restart węzła, czyli podłączenie do sieci od nowa. Ponieważ wszystkie odcięte węzły zareagują w podobnym momencie to nie powinno być sytuacji, że podłączamy się do martwej podsieci. Automatyzacja "reconnecta" to już rzecz drugorzędna - ważne, żeby zdać sobie sprawę z utworzenia podsieci jak najszybciej, aby uniknąć kopania niepotrzebnych bloków! Pomysł jest autorski, a wszystkie kryptowaluty już pewnie mają swoje sprawdzone metody, więc warto też poszukać jak one rozwiązują tę sytuację.
+
+Spójność nie powinna być problemem, ponieważ martwa podsieć po prostu zapomni co wypracowała i przyjmie stan głównej gałęzi. Jeśli reakcja będzie wystarczająco szybka to nie będzie to problem bo zmarnowana praca nie osiągnie dużych rozmiarów.
+
+Uwaga! Zastanowić się, czy wiadomość o poprawnym połączeniu do sieci powinna być sprawdzana na podstawie jakiegoś pola zawartego wewnątrz niej, a nie czasu otrzymania. Co w przypadku, gdy wiadomość rozsyłana jest z opóźnieniem spowodowanym tymczasową awarią mostu? Czy takie rozsyłanie oznacza, że podsieć znowu dołączyła do sieci głównej? Czy może opóźni to tylko czas reakcji na utworzenie martwego odłamu? (Osobiście uważam, że chyba to pierwsze - optymistyczny scenariusz)
 
 # Lista ogólnych pomysłów
 Tutaj dopisywać ogólne pomysły na temat lub i w przyszłość, ewentualne uwagi, generalnie to czego brakuje!
