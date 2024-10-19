@@ -85,6 +85,7 @@ Po wysłaniu GET :5001/leave_network i otrzymaniu informacji o powodzeniu broadc
 !!!!!!  UWAGA !!!!!
 Najprawdopodobniej można podrobić requesty, żeby spowodować odłączenie node'a od sieci. Możliwe rozwiązania to nie usuwać teoretycznie odchodzącego node'a z list sąsiadów. Wtedy i tak będzie otrzymywać broadcast-y (może trochę okrężną drogą ale dostanie) dopóki sam nie zamknie programu, a wtedy inne node'y same go odłączą (można ew. usprawnić przez zapamiętanie informacji, kto opuszcza). Druga metoda to podpisywanie żądania opuszczenia, ale ponieważ węzeł nie powinien być połączony jednoznacznie z żadnym kluczem to nie powinno tak być.
 
+Złośliwe węzły mogą się nigdy nie zgadzać na opuszczenie sieci przez innych - nie ma na to rady innej niż po prostu opuścić na siłę (ctrl-c). Wtedy zapobieganie tworzenia się podsieci powinno naprawić sieć.
 ### Nagłe opuszczanie sieci - dodane 18.10
 Węzeł, który w sposób nieoczekiwany opuści sieć może utworzyć "dziurę".
 
@@ -106,6 +107,9 @@ Pomysł na rozwiązanie:
 Węzeł INIT/Genesis raz na jakiś czas powinień wysłać wiadomość broadcast o treści "Cześć, potwierdzam że twoje połączenie z siecią jest poprawne". Czas, co jaki jest wysyłane takie powiadomienie powinien być stały i znany każdemu węzłowi. Dzięki temu jeśli taki czas wynosi np. 1 minuta to każdy węzeł po np. 2 minutach (ważne, żeby ustalić po jakim czasie podejmowane są działania, w gre wchodzą opóźnienia w przesyłaniu!) zorientuje się "Od dawna nie dostałem potwierdzenia, czy ja jestem w sieci?". W reakcji na takie spostrzeżenie wyświetli komunikat proszący użytkownika o restart węzła, czyli podłączenie do sieci od nowa. Ponieważ wszystkie odcięte węzły zareagują w podobnym momencie to nie powinno być sytuacji, że podłączamy się do martwej podsieci. Automatyzacja "reconnecta" to już rzecz drugorzędna - ważne, żeby zdać sobie sprawę z utworzenia podsieci jak najszybciej, aby uniknąć kopania niepotrzebnych bloków! Pomysł jest autorski, a wszystkie kryptowaluty już pewnie mają swoje sprawdzone metody, więc warto też poszukać jak one rozwiązują tę sytuację.
 
 Spójność nie powinna być problemem, ponieważ martwa podsieć po prostu zapomni co wypracowała i przyjmie stan głównej gałęzi. Jeśli reakcja będzie wystarczająco szybka to nie będzie to problem bo zmarnowana praca nie osiągnie dużych rozmiarów.
+
+19.10
+Może zautomatyzować naprawę sieci poprzez odpytanie Genesis do kogo ma się podłączyć węzeł, który stracił połączenie (Genesis może być podany jako parametr wejściowy każdego węzła). Wtedy genesis przyjmie do siebie połączenie straconej podsieci albo przekieruje do jednego ze swoich sąsiadów. Rozwiązanie może mocno obciążyć genesis i wprowadzić kolejny pierwiastek centralizacji do sieci, co nie jest mile widziane - ale w ostateczności?
 
 Uwaga! Zastanowić się, czy wiadomość o poprawnym połączeniu do sieci powinna być sprawdzana na podstawie jakiegoś pola zawartego wewnątrz niej, a nie czasu otrzymania. Co w przypadku, gdy wiadomość rozsyłana jest z opóźnieniem spowodowanym tymczasową awarią mostu? Czy takie rozsyłanie oznacza, że podsieć znowu dołączyła do sieci głównej? Czy może opóźni to tylko czas reakcji na utworzenie martwego odłamu? (Osobiście uważam, że chyba to pierwsze - optymistyczny scenariusz)
 
