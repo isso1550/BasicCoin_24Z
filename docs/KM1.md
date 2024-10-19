@@ -82,6 +82,9 @@ Testowane przy pomocy następującej sieci (run_big.bat):
 Po wysłaniu GET :5001/leave_network i otrzymaniu informacji o powodzeniu broadcasty rozchodzą się od :5000 do pozostałych (2,3,4,5,6).
 
 
+!!!!!!  UWAGA !!!!!
+Najprawdopodobniej można podrobić requesty, żeby spowodować odłączenie node'a od sieci. Możliwe rozwiązania to nie usuwać teoretycznie odchodzącego node'a z list sąsiadów. Wtedy i tak będzie otrzymywać broadcast-y (może trochę okrężną drogą ale dostanie) dopóki sam nie zamknie programu, a wtedy inne node'y same go odłączą (można ew. usprawnić przez zapamiętanie informacji, kto opuszcza). Druga metoda to podpisywanie żądania opuszczenia, ale ponieważ węzeł nie powinien być połączony jednoznacznie z żadnym kluczem to nie powinno tak być.
+
 ### Nagłe opuszczanie sieci - dodane 18.10
 Węzeł, który w sposób nieoczekiwany opuści sieć może utworzyć "dziurę".
 

@@ -73,8 +73,12 @@ app.put(NEIGHBORS_ENDPOINT, (req, res) => {
     //Receive potential new master from leaving node.
     new_master = req.body['new_master']
     leaving_node = req.body['leaving_node']
-    //Remove leaving node
-    //https://stackoverflow.com/questions/5767325/how-can-i-remove-a-specific-item-from-an-array-in-javascript
+    /*Remove leaving node 
+    Currently disabled to prevent false requests from removing other nodes from net
+
+    https://stackoverflow.com/questions/5767325/how-can-i-remove-a-specific-item-from-an-array-in-javascript
+    */
+    /*
     const idx = Neighbors.indexOf(leaving_node)
     if (idx > -1) {
         Neighbors.splice(idx, 1)
@@ -82,6 +86,7 @@ app.put(NEIGHBORS_ENDPOINT, (req, res) => {
     } else {
         console.warn("Leaving neighbor address not found. Possible error with request.")
     }
+    */
 
     if (new_master != MY_ADDRESS){
         CONNECT_TO_ADDR = new_master
