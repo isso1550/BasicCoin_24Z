@@ -69,6 +69,19 @@ Węzeł zgłasza opuszczenie sieci do najstarszego sąsiada (pierwszego w liści
 Podejście nie jest optymalne i stworzy wiele nadmiarowych połączeń, ale na ten moment to jedyne co jestem w stanie wymyślić. Warto zbadać to dokładniej wykorzystując różne wykresy. Może się okazać, że jest sposób na znalezienie minimalnych połączeń do przekazania. Zwrócić uwagę na metody stosowane w teorii grafów, może wykorzystać jakoś mechanizm broadcast?
 
 
+Zaimplementowane rozwiązanie (19.10):
+
+Dla uproszczenia będę używać master - node do którego łączy się nasz node przy uruchomieniu, slave - node'y które podłączyły się do naszego node'a
+
+Opuszczający węzeł przekazuje do swojego mastera żądanie opuszczenia razem z listą swoich sąsiadów. Jeśli master się zgodzi to update'uje swoją listę sąsiadów. Jeśli master sam próbuje opuścić sieć to zwraca informacje o tym i odrzuca żądanie - każe poczekać. Po otrzymaniu akceptacji żądania opuszczający węzeł rozsyła adres mastera do wszystkich swoich sąsiadów, żeby mogli zaktualizować swojego mastera. Ponieważ wszyscy na liście sąsiadów węzła są jego slave'ami to przekazanie ich wszystkich do mastera nie utworzy nowych połączeń (!), ale zachowa nadmiarowe jeśli takie istnieją. Jeśli master sam opuszcza sieć to po pewnym czasie opuszczający node powinien otrzymać nowego master'a - wtedy powinien powtórzyć request (wszystko powinno być na tyle szybkie, że nie będzie większych problemów). Jeśli podczas przekazywania nowego mastera połączenie do któregoś slave'a się nie uda to niestety jest on porzucany i zauważy swój brak połączenia dopiero po pewnym czasie - kiedy będzie próbować się porozumieć z masterem. Jest jednak szansa, że to przetrwa dzięki innym połączeniom. Problem będzie całkowicie rozwiązany przy implementacji rozwiązania problemu kolejnego rozdziału.
+
+Testowane przy pomocy następującej sieci (run_big.bat):
+
+<img src="run_big_graph.png" alt="Schemat sieci testowej" width="40%">
+
+Po wysłaniu GET :5001/leave_network i otrzymaniu informacji o powodzeniu broadcasty rozchodzą się od :5000 do pozostałych (2,3,4,5,6).
+
+
 ### Nagłe opuszczanie sieci - dodane 18.10
 Węzeł, który w sposób nieoczekiwany opuści sieć może utworzyć "dziurę".
 
