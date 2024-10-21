@@ -91,6 +91,9 @@ app.put(NEIGHBORS_ENDPOINT, (req, res) => {
     if (new_master != MY_ADDRESS){
         CONNECT_TO_ADDR = new_master
         if (VERBOSE) { console.log(`Updated master to ${new_master}`)}
+        // Probably should also add the new master to neighbors
+        Neighbors.push(new_master);
+        if (VERBOSE) {console.log(`Set the new master as a neighbor.`)}
     } else {
         if (VERBOSE) { console.log(`Master not updated. It's me.`)}
     }
@@ -99,6 +102,7 @@ app.put(NEIGHBORS_ENDPOINT, (req, res) => {
 })
 
 app.post(BROADCAST_ENDPOINT, (req, res) => {
+    // NOTE: It also resends the message back from where it came from
     body = req.body
     if (Message_hashes.includes(body['hash'])) {
         if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${body['hash']} from ${body['source']}: Skipping message, already received`) }
