@@ -1,3 +1,5 @@
+#!/bin/bash
+
 node source/Node.js 5000 INIT &
 node source/Node.js 5001 http://localhost:5000 &
 node source/Node.js 5002 http://localhost:5001 &
