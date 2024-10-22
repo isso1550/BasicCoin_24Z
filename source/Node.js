@@ -9,14 +9,20 @@ TODO: connection verification, leaving network, wallet integration (how? now?), 
 */
 
 const Crypto = require('crypto');
-const express = require('express')
-const http = require('http');
-const { url } = require('inspector');
+const express = require('express');
 const app = express()
+const { Worker } = require('worker_threads')
 app.use(express.json());
+
+
+/*TODO move configuration to module/config file*/
 
 //Adresses and modes
 var VERBOSE = true
+var MINER = false 
+var DIFFICULTY = 5
+var BUSY_MINING = false
+
 var ORIGIN_MODE = false //ORIGIN = First node in network
 var MY_ADDRESS
 var CONNECT_TO_ADDR
@@ -32,17 +38,34 @@ var NEIGHBORS_ENDPOINT = "/neighbors"
 
 //Stored data
 var Neighbors = [];
-//TODO: Store all messages or remove them after certain time?
-var Messages = [];
+//TODO: hashes stored in one array, but details in appropriate 
 var Message_hashes = [];
+
+var Blocks = [];
+var Transactions = [];
+var MinedTransactions = [];
+
 
 app.get('/', (req, res) => {
     res.send('Hello World!')
 })
 
 app.get('/messages', (req, res) => {
-    res.send(Messages)
+    res.send(Message_hashes)
 })
+
+app.get('/transactions', (req, res) => {
+    res.send(Transactions)
+})
+
+app.get('/blocks', (req, res) => {
+    res.send(Blocks)
+})
+
+app.get('/minedtransactions', (req, res) => {
+    res.send(MinedTransactions)
+})
+
 
 app.get(NEIGHBORS_ENDPOINT, (req, res) => {
     res.send(Neighbors)
@@ -103,28 +126,37 @@ app.put(NEIGHBORS_ENDPOINT, (req, res) => {
 
 app.post(BROADCAST_ENDPOINT, (req, res) => {
     // NOTE: It also resends the message back from where it came from
-    body = req.body
-    if (Message_hashes.includes(body['hash'])) {
-        if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${body['hash']} from ${body['source']}: Skipping message, already received`) }
+    payload = req.body
+
+    if (Message_hashes.includes(payload['hash'])) {
+        if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${payload['hash']}: Skipping message, already received`) }
         var message = "Message already received"
         var status = 422
 
     } else {
-        if (verify_message_hash(body) != true) {
-            if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${body['hash']} from ${body['source']}: Skipping message, hash verification failed `) }
-            var message = "Message hash verification failed"
+        if (verify_message_hash(payload) != true) {
+            if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${payload['hash']}: Skipping message, hash verification failed `) }
+            var message = "Message hash verification failed, possible connection issue"
             var status = 400
         } else {
-            if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${body['hash']} from ${body['source']}: Saving message `) }
-            Message_hashes.push(body['hash'])
-            Messages.push(body)
-            for (const neigh of Neighbors) {
-                if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${body['hash']} from ${body['source']}: Resending message to ${neigh}`) }
-                let url = neigh + BROADCAST_ENDPOINT
-                send_message(url, body, (status, data) => { console.log(url, status, data) }, broadcast = true)
-            }
-            var message = "Message broadcasted further"
+            if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${payload['hash']}: Processing message `) }
+            let type = payload['type']
+            Message_hashes.push(payload['hash'])
+            
+            var message = "Message processed"
             var status = 200
+            switch (type){
+                case "Transaction":
+                    process_transaction(payload)
+                    break;
+                case "Block":
+                    process_block(payload)
+                    break;
+                default:
+                    if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${payload['hash']}: Unknown message type ${type}`) }
+                    var message = "Unknown message type"
+                    var status = 400
+            }
         }
     }
     resp = {
@@ -134,33 +166,104 @@ app.post(BROADCAST_ENDPOINT, (req, res) => {
     res.send(resp)
 })
 
-app.get('/test_broadcast', (req, res) => {
-    //Sends random broadcast message for testing
-    let data = {
-        message: "Broadcast test",
-        random: Math.random()
-    };
-    let save = true
+function broadcast_message(payload){
+    tasks = []
     for (const neigh of Neighbors) {
-        let url = neigh + '/broadcast'
-        send_message(url, data, (status, data) => {
-            console.log(url, status, data)
-        }, false, save)
-        save = false
+        if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${payload['hash']}: Forwarding broadcast message to ${neigh}`) }
+        let url = neigh + BROADCAST_ENDPOINT
+        tasks.push(send_message(url, payload, (status, data) => { /*console.log(url, status, data)*/ }))
     }
-    console.log("Broadcast initiated")
-    res.send({ message: "Broadcast initiated" })
+    return tasks
+}
+
+async function process_transaction(payload){
+    console.log(`Received transaction ${JSON.stringify(payload['data'])}`)
+    Transactions.push(payload)
+    tasks = broadcast_message(payload)
+    if (MINER) {
+        await Promise.all(tasks)
+        try_to_mine()
+    }
+}
+
+async function try_to_mine(){
+    /* Async function check if miner node is busy and decides whether to start mining */
+    if (!BUSY_MINING && Transactions.length > 0){
+        if (VERBOSE) { console.log("Starting mining ", Transactions)}
+        BUSY_MINING = true
+        block = create_block()
+        /*Start mining thread*/
+        const worker = new Worker("./source/miner.js", {workerData : {block:block, DIFFICULTY:DIFFICULTY, HASH_ALGO:HASH_ALGO}});
+        worker.once("message", async (result) => {
+            block = result
+            payload = prepare_payload("Block", block)
+            Blocks.push(payload)
+            MinedTransactions.push(Transactions.pop())
+            Message_hashes.push(payload['hash'])
+            //Broadcast new block
+            tasks = broadcast_message(payload)
+            await Promise.all(tasks)
+            BUSY_MINING = false
+            //Try mining next one
+            try_to_mine()
+        });
+        worker.on("error", error => {
+            console.log(error);
+        });
+        worker.on("exit", exitCode => {
+            console.log(`It exited with code ${exitCode}`);
+        })
+        
+    }
+}
+
+function create_block(){
+    /* Create new block based on saved data */
+    block = {
+        //"prev_hash": Crypto.createHash(HASH_ALGO).update(JSON.stringify(Blocks.at(-1)['data'])).digest('hex'),
+        "prev_hash" : Blocks.at(-1)['hash'],
+        "transaction": Transactions.at(0)['data'],
+        "nonce":0,
+        "timestamp": Date.now()
+        }
+    return block
+}
+
+function process_block(payload){
+    /*TODO move transacctions to mined transactions*/
+    console.log(`Received block`)
+    Blocks.push(payload)
+    broadcast_message(payload)
+}
+
+app.get('/test_broadcast', (req, res) => {
+    let data = {
+        "type": "Standard",
+        "sender": "id1",
+        "receiver": "id2",
+        "amount" : Math.floor(Math.random()*100)
+    }
+    let type = "Transaction"
+    let payload = prepare_payload(type, data)
+
+    if (!Message_hashes.includes(payload['hash'])) {
+        Message_hashes.push(payload['hash'])
+        process_transaction(payload)
+        console.log("Broadcast initiated")
+        res.send({ message: "Broadcast initiated" })
+    }
+    
 })
 
 app.post(REGISTER_ENDPOINT, (req, res) => {
     /*Register new node in the network*/
     body = req.body
+    addr = body['data']['source']
     if (verify_message_hash(body) != true) {
         if (VERBOSE) { console.log(REGISTER_ENDPOINT + ": Skipping " + addr + ". Message hash verification failed.") }
         var message = "Message hash verification failed"
         var status = 400
     } else {
-        addr = body['source']
         if (Neighbors.includes(addr)) {
             //If node already known skip
             if (VERBOSE) { console.log(REGISTER_ENDPOINT + ": Skipping " + addr + ". Already known.") }
@@ -186,11 +289,12 @@ app.get('/join_network', (req, res) => {
     //https://stackoverflow.com/questions/51973958/how-to-get-data-and-response-status-from-api-using-node-fetch
     let url = CONNECT_TO_ADDR + REGISTER_ENDPOINT
     let data = {
-        message: "Hello",
+        source: MY_ADDRESS,
     };
+    payload = prepare_payload("Handshake", data)
     if (VERBOSE) { console.log(`Joining network: messaging ${CONNECT_TO_ADDR}`) }
-    send_message(url, data, (status, data) => {
-        console.log(url, status, data)
+    send_message(url, payload, (status, data) => {
+        //console.log(url, status, data)
         res.send(data)
     })
 });
@@ -251,33 +355,26 @@ function verify_message_hash(body) {
     message_hash = Crypto.createHash(HASH_ALGO).update(JSON.stringify(body['data'])).digest('hex');
     return message_hash == received_hash
 }
-
-function send_message(url, data, _callback, broadcast = false, save_message = false) {
-    /*Send json message using fetch API
-
-    url - target url
-    data - content of the request
-    broadcast - specifies whether passed data should be packed with source address and time_sent or sent literally
-    save_message - specifies whether prepared message should be saved to messages 
-        WARNING! might be easier to replace it with another callback for future (save transaction different than save message etc...)
+function prepare_payload(type, data, _callback){
+    /*Prepare message content to match universal app standard
+    Now only hash, but may include timestamps etc.
     */
-    if (broadcast) {
-        var payload = data
-    } else {
-        var payload = {
-            source: MY_ADDRESS,
-            data: data,
-            time_sent: Date.now()
-        }
-        data_hash = Crypto.createHash(HASH_ALGO).update(JSON.stringify(data)).digest('hex');
-        payload.hash = data_hash
-
-        if (save_message) {
-            Message_hashes.push(payload['hash'])
-            Messages.push(payload)
-        }
+    payload = {
+        "type": type,
+        "data": data
     }
-    fetch(url,
+    data_hash = Crypto.createHash(HASH_ALGO).update(JSON.stringify(data)).digest('hex');
+    payload.hash = data_hash
+
+    if(_callback){
+        _callback(payload)
+    } else {
+        return payload
+    }
+}
+async function send_message(url, payload, _callback, retries=3){
+    /*Send payload to url using POST*/
+    return fetch(url,
         {
             method: "POST",
             body: JSON.stringify(payload),
@@ -292,7 +389,13 @@ function send_message(url, data, _callback, broadcast = false, save_message = fa
         })
         .catch((err) => {
             console.log(err)
-            console.warn(`Can't connect to ${url}`)
+            console.warn(`Can't connect to ${url}, retrying ${retries} more times`)
+            if (retries > 0){
+                return send_message(url,payload,_callback, retries=retries-1)
+            } else {
+                return 
+            }
+            
 
         })
 }
@@ -343,6 +446,30 @@ if (process.argv[3]) {
 }
 
 MY_ADDRESS = "http://localhost:" + port
+
+/* Hard coded GENESIS block */
+
+GENESIS = {
+    "type":"Block",
+    "data": {
+        "prev_hash": "GENESIS",
+        "transaction" : "GENESIS",
+        "nonce" : 0,
+        "timestamp" : Date.now() 
+    },
+    "hash":"GENESIS"
+    
+}
+Blocks.push(GENESIS)
+
+//Artificial miner param - todo cli param
+CREATE_MINER = false
+if (CREATE_MINER){
+    if (port == 5001){
+        MINER = true
+    }
+}
+
 
 app.listen(port, () => {
     console.log(`Node server running: port ${port}`)
