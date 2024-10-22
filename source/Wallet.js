@@ -154,7 +154,7 @@ exports.register =  function (db, /*string*/name, /*string*/password, _callback)
         }
       }, (err, publicKey, privateKey) => {
         save_identity(db, name, publicKey, privateKey, _callback)
-      });   
+      });   // TODO: sprawdzić IV, CBC -- padding oracle attack
 }
 exports.login = function (db, /*string*/name, /*string*/password, _callback){
     //Loads keys from wallet and creates key objects
