@@ -114,8 +114,10 @@ app.put(NEIGHBORS_ENDPOINT, (req, res) => {
     if (new_master != MY_ADDRESS){
         CONNECT_TO_ADDR = new_master
         if (VERBOSE) { console.log(`Updated master to ${new_master}`)}
-        // Probably should also add the new master to neighbors
-        Neighbors.push(new_master);
+        if (!Neighbors.includes(new_master)) {
+            // Probably should also add the new master to neighbors
+            Neighbors.push(new_master);
+        }
         if (VERBOSE) {console.log(`Set the new master as a neighbor.`)}
     } else {
         if (VERBOSE) { console.log(`Master not updated. It's me.`)}
@@ -188,6 +190,8 @@ async function process_transaction(payload){
 
 async function try_to_mine(){
     /* Async function check if miner node is busy and decides whether to start mining */
+    //TODO future: terminate worker when new block arrives (same block or any?)
+
     if (!BUSY_MINING && Transactions.length > 0){
         if (VERBOSE) { console.log("Starting mining ", Transactions)}
         BUSY_MINING = true
@@ -200,7 +204,7 @@ async function try_to_mine(){
             Blocks.push(payload)
             MinedTransactions.push(Transactions.pop())
             Message_hashes.push(payload['hash'])
-            //Broadcast new block
+            //Broadcast new block - wait for broadcast to finish before moving on
             tasks = broadcast_message(payload)
             await Promise.all(tasks)
             BUSY_MINING = false
@@ -208,10 +212,12 @@ async function try_to_mine(){
             try_to_mine()
         });
         worker.on("error", error => {
-            console.log(error);
+            console.warn(error);
+            BUSY_MINING = false
         });
         worker.on("exit", exitCode => {
-            console.log(`It exited with code ${exitCode}`);
+            console.warn(`It exited with code ${exitCode}`);
+            BUSY_MINING = false
         })
         
     }
@@ -231,6 +237,7 @@ function create_block(){
 
 function process_block(payload){
     /*TODO move transacctions to mined transactions*/
+    //TODO verify prev_hash corresponds to current data
     console.log(`Received block`)
     Blocks.push(payload)
     broadcast_message(payload)
