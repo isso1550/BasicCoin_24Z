@@ -1,6 +1,7 @@
 /* Thread for intensive mining work */
 
 const { isMainThread, workerData, parentPort } = require('worker_threads');
+const Logger = require('./ConsoleLogger')
 const Crypto = require('crypto');
 
 if (!isMainThread) {
@@ -17,6 +18,7 @@ function mine(block){
         block['nonce'] = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)
         hash = Crypto.createHash(HASH_ALGO).update(JSON.stringify(block)).digest('hex');
     }
-    console.log(`Mined block with hash ${hash.slice(0,10)}... in ${n} tries`)
+    //console.log(`Mined block with hash ${hash.slice(0,10)}... in ${n} tries`)
+    Logger.log("MINED", {hash: hash.slice(0,10)+"...", tries: n})
     return block
 }
