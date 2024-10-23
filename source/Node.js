@@ -13,7 +13,7 @@ const express = require('express');
 const app = express()
 const { Worker } = require('worker_threads')
 const Logger = require("./ConsoleLogger.js")
-const AppConfig = require('./AppConfig.js')
+const AppConfig = require('./AppConfig.js');
 app.use(express.json());
 
 
@@ -485,13 +485,12 @@ GENESIS = {
 Blocks.push(GENESIS)
 
 //Artificial miner param - todo cli param
-CREATE_MINER = true
+CREATE_MINER = false
 if (CREATE_MINER) {
     if (port == 5001) {
         MINER = true
     }
 }
-
 
 app.listen(port, () => {
     console.log(`Node server running: port ${port}`)
