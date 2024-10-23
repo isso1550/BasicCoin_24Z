@@ -2,12 +2,13 @@
 
 const { isMainThread, workerData, parentPort } = require('worker_threads');
 const Logger = require('./ConsoleLogger')
+const AppConfig = require('./AppConfig.js')
 const Crypto = require('crypto');
 
 if (!isMainThread) {
- var HASH_ALGO = workerData.HASH_ALGO
- var DIFFICULTY = workerData.DIFFICULTY
- parentPort.postMessage(mine(workerData.block));
+    var HASH_ALGO = AppConfig.HASH_ALGO
+    var DIFFICULTY = AppConfig.DIFFICULTY
+    parentPort.postMessage(mine(workerData.block));
 }
 
 function mine(block){

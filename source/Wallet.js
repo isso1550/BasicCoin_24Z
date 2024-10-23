@@ -8,18 +8,10 @@ Warning: Before release consider changing method of obtaining wallet db path in 
 
 const Sqlite3 = require('sqlite3').verbose();
 const Crypto = require('crypto');
+const AppConfig = require('./AppConfig.js')
 
 
 const fs = require('fs');
-
-var KEY_ALGO = "rsa"
-var KEY_MODULUS_LEN = 4096
-var KEY_FORMAT = "pem"
-var PK_TYPE = "spki"
-var SK_TYPE = "pkcs8"
-var SK_CIPHER = 'aes-256-cbc'
-
-var HASH_ALGO = 'sha256'
 
 var VERBOSE = true
 
@@ -96,7 +88,7 @@ function save_identity(db, name, publicKey, privateKey, _callback) {
                 throw new Error("Error encountered during saving identity")
             }
             //No name verification - assumes user doesn't want to destroy his own wallet
-            let id = Crypto.createHash(HASH_ALGO).update(publicKey).digest('hex');
+            let id = Crypto.createHash(AppConfig.HASH_ALGO).update(publicKey).digest('hex');
             //TODO Handle errors?
             db.run(`INSERT INTO Identities VALUES ('${name}', '${id}', '${publicKey}', '${privateKey}')`)
             if (VERBOSE) { console.log(`Identity ${name} succesfully created.`) }
@@ -140,16 +132,16 @@ var print_identities = exports.print_identities = function (db, _callback){
 /* ASYM KEYS SECTION */
 exports.register =  function (db, /*string*/name, /*string*/password, _callback) {
     //Creates keypair and saves to wallet
-    Crypto.generateKeyPair(KEY_ALGO, {
-        modulusLength: KEY_MODULUS_LEN,
+    Crypto.generateKeyPair(AppConfig.KEY_ALGO, {
+        modulusLength: AppConfig.KEY_MODULUS_LEN,
         publicKeyEncoding: {
-          type: PK_TYPE,
-          format: KEY_FORMAT
+          type: AppConfig.PK_TYPE,
+          format: AppConfig.KEY_FORMAT
         },
         privateKeyEncoding: {
-          type: SK_TYPE,
-          format: KEY_FORMAT,
-          cipher: SK_CIPHER,
+          type: AppConfig.SK_TYPE,
+          format: AppConfig.KEY_FORMAT,
+          cipher: AppConfig.SK_CIPHER,
           passphrase: password
         }
       }, (err, publicKey, privateKey) => {
@@ -162,15 +154,15 @@ exports.login = function (db, /*string*/name, /*string*/password, _callback){
     load_identity(db, name, (id, /*str*/pk, /*str*/sk) => {
         var publicKey = Crypto.createPublicKey({
             'key': pk,
-            'format': KEY_FORMAT,
-            'type': PK_TYPE
+            'format': AppConfig.KEY_FORMAT,
+            'type': AppConfig.PK_TYPE
         });
         try{
             var privateKey = Crypto.createPrivateKey({
                 'key': sk,
-                'format': KEY_FORMAT,
-                'type': SK_TYPE,
-                'cipher': SK_CIPHER,
+                'format': AppConfig.KEY_FORMAT,
+                'type': AppConfig.SK_TYPE,
+                'cipher': AppConfig.SK_CIPHER,
                 'passphrase': password
             });
         } catch (error){

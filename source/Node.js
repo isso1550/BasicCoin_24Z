@@ -13,29 +13,20 @@ const express = require('express');
 const app = express()
 const { Worker } = require('worker_threads')
 const Logger = require("./ConsoleLogger.js")
+const AppConfig = require('./AppConfig.js')
 app.use(express.json());
 
 
 /*TODO move configuration to module/config file*/
 
 //Adresses and modes
-var VERBOSE = true
+//var VERBOSE = true
 var MINER = false
-var DIFFICULTY = 5
 var BUSY_MINING = false
-
 var ORIGIN_MODE = false //ORIGIN = First node in network
 var MY_ADDRESS
 var CONNECT_TO_ADDR
 var ATTEMPTING_TO_LEAVE = false //Node is currently trying to leave
-
-//Crypto params
-HASH_ALGO = 'sha256'
-
-//Endpoints
-var REGISTER_ENDPOINT = "/register_neighbor"
-var BROADCAST_ENDPOINT = "/broadcast"
-var NEIGHBORS_ENDPOINT = "/neighbors"
 
 //Stored data
 var Neighbors = [];
@@ -68,11 +59,11 @@ app.get('/minedtransactions', (req, res) => {
 })
 
 
-app.get(NEIGHBORS_ENDPOINT, (req, res) => {
+app.get(AppConfig.NEIGHBORS_ENDPOINT, (req, res) => {
     res.send(Neighbors)
 })
 
-app.delete(NEIGHBORS_ENDPOINT, (req, res) => {
+app.delete(AppConfig.NEIGHBORS_ENDPOINT, (req, res) => {
     //Receive request made by neighbor to leave network 
     //if (VERBOSE) { console.log(`${NEIGHBORS_ENDPOINT} One of the neighbors is attempting to leave network`) }
     Logger.log("NEIGH_LEAVE_REQ")
@@ -96,7 +87,7 @@ app.delete(NEIGHBORS_ENDPOINT, (req, res) => {
     res.send()
 })
 
-app.put(NEIGHBORS_ENDPOINT, (req, res) => {
+app.put(AppConfig.NEIGHBORS_ENDPOINT, (req, res) => {
     //Receive potential new master from leaving node.
     new_master = req.body['new_master']
     leaving_node = req.body['leaving_node']
@@ -132,7 +123,7 @@ app.put(NEIGHBORS_ENDPOINT, (req, res) => {
     res.send()
 })
 
-app.post(BROADCAST_ENDPOINT, (req, res) => {
+app.post(AppConfig.BROADCAST_ENDPOINT, (req, res) => {
     // NOTE: It also resends the message back from where it came from
     payload = req.body
 
@@ -183,7 +174,7 @@ function broadcast_message(payload) {
     for (const neigh of Neighbors) {
         //if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${payload['hash']}: Forwarding broadcast message to ${neigh}`) }
         Logger.log("BCAST_FORWARD", {"payload_hash": payload["hash"], "target": neigh})
-        let url = neigh + BROADCAST_ENDPOINT
+        let url = neigh + AppConfig.BROADCAST_ENDPOINT
         tasks.push(send_message(url, payload, (status, data) => { /*console.log(url, status, data)*/ }))
     }
     return tasks
@@ -210,7 +201,7 @@ async function try_to_mine() {
         BUSY_MINING = true
         block = create_block()
         /*Start mining thread*/
-        const worker = new Worker("./source/miner.js", { workerData: { block: block, DIFFICULTY: DIFFICULTY, HASH_ALGO: HASH_ALGO } });
+        const worker = new Worker("./source/miner.js", { workerData: { block: block} });
         worker.once("message", async (result) => {
             block = result
             payload = prepare_payload("Block", block)
@@ -276,7 +267,7 @@ app.get('/test_broadcast', (req, res) => {
 
 })
 
-app.post(REGISTER_ENDPOINT, (req, res) => {
+app.post(AppConfig.REGISTER_ENDPOINT, (req, res) => {
     /*Register new node in the network*/
     body = req.body
     addr = body['data']['source']
@@ -304,10 +295,10 @@ app.post(REGISTER_ENDPOINT, (req, res) => {
     res.send(resp)
 })
 
-app.get('/join_network', (req, res) => {
+app.get(AppConfig.JOIN_NET_ENDPOINT, (req, res) => {
     //Send hello message to adress specified as CLI arg -> join network
     //https://stackoverflow.com/questions/51973958/how-to-get-data-and-response-status-from-api-using-node-fetch
-    let url = CONNECT_TO_ADDR + REGISTER_ENDPOINT
+    let url = CONNECT_TO_ADDR + AppConfig.REGISTER_ENDPOINT
     let data = {
         source: MY_ADDRESS,
     };
@@ -325,12 +316,12 @@ app.get('/join_network', (req, res) => {
     })
 });
 
-app.get("/leave_network", (req, res) => {
+app.get(AppConfig.LEAVE_NET_ENDPOINT, (req, res) => {
     //if (VERBOSE) { console.log("Attempting to leave network gracefully") }
     ATTEMPTING_TO_LEAVE = true
     Logger.log("LEAVE_START")
     let payload = Neighbors
-    let url = CONNECT_TO_ADDR + NEIGHBORS_ENDPOINT
+    let url = CONNECT_TO_ADDR + AppConfig.NEIGHBORS_ENDPOINT
     fetch(url,
         {
             method: "DELETE",
@@ -345,7 +336,7 @@ app.get("/leave_network", (req, res) => {
                 //if (VERBOSE) { console.log(`Received ${resp_status}. Informing neighbors`) }
                 Logger.log("LEAVE_ACCEPT")
                 for (const neigh of Neighbors) {
-                    url = neigh + NEIGHBORS_ENDPOINT
+                    url = neigh + AppConfig.NEIGHBORS_ENDPOINT
                     //if (VERBOSE) { console.log(`Updating master for ${neigh}`) }
                     Logger.log("LEAVE_MSG_NEIGH", {"target": neigh})
                     fetch(url,
@@ -394,7 +385,7 @@ function prepare_payload(type, data, _callback) {
         "type": type,
         "data": data
     }
-    data_hash = Crypto.createHash(HASH_ALGO).update(JSON.stringify(data)).digest('hex');
+    data_hash = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(data)).digest('hex');
     payload.hash = data_hash
 
     if (_callback) {
@@ -494,7 +485,7 @@ GENESIS = {
 Blocks.push(GENESIS)
 
 //Artificial miner param - todo cli param
-CREATE_MINER = false
+CREATE_MINER = true
 if (CREATE_MINER) {
     if (port == 5001) {
         MINER = true

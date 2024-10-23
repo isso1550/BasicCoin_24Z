@@ -1,5 +1,5 @@
 const chalk = require('chalk');
-const app_config = require('./Config.js')
+const AppConfig = require('./AppConfig.js')
 
 var SHOW_TIME = true
 var SHORTEN_MSG_HASH = true
@@ -147,7 +147,7 @@ exports.log = function log(message_code, info){
         
     }
     
-    endpoint = app_config[conf[message_code]['endpoint']]
+    endpoint = AppConfig[conf[message_code]['endpoint']]
     if (!(endpoint==null)){
         msg += (conf[message_code]["style"](endpoint) + " ")
     }
