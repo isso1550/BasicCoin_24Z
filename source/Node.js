@@ -34,8 +34,12 @@ var Neighbors = [];
 var Message_hashes = [];
 
 var Blocks = [];
-var Transactions = [];
-var MinedTransactions = [];
+
+var BlocksMap = new Map();
+
+
+var PendingTransactions = new Map();
+
 
 
 app.get('/', (req, res) => {
@@ -46,18 +50,24 @@ app.get('/messages', (req, res) => {
     res.send(Message_hashes)
 })
 
-app.get('/transactions', (req, res) => {
-    res.send(Transactions)
+app.get('/pendingtransactions', (req, res) => {
+    ar = Array.from(PendingTransactions, ([name, value]) => ({ value }));
+    res.send(ar)
+})
+
+app.get('/blocksmap', (req, res) => {
+    ar = Array.from(BlocksMap, ([name, value]) => ({ name, value }));
+    res.send(ar)
 })
 
 app.get('/blocks', (req, res) => {
     res.send(Blocks)
 })
 
-app.get('/minedtransactions', (req, res) => {
-    res.send(MinedTransactions)
+app.get('/balance', (req, res) => {
+    ar = Array.from(calculate_balance(), ([name, value]) => ({ name, value }));
+    res.send(ar)
 })
-
 
 app.get(AppConfig.NEIGHBORS_ENDPOINT, (req, res) => {
     res.send(Neighbors)
@@ -65,10 +75,8 @@ app.get(AppConfig.NEIGHBORS_ENDPOINT, (req, res) => {
 
 app.delete(AppConfig.NEIGHBORS_ENDPOINT, (req, res) => {
     //Receive request made by neighbor to leave network 
-    //if (VERBOSE) { console.log(`${NEIGHBORS_ENDPOINT} One of the neighbors is attempting to leave network`) }
     Logger.log("NEIGH_LEAVE_REQ")
     if (ATTEMPTING_TO_LEAVE) {
-        //if (VERBOSE) { console.log(`${NEIGHBORS_ENDPOINT} Leave network request dismissed. Currently leaving myself.`) }
         Logger.log("NEIGH_LEAVE_DENY")
         var status = 503
     } else {
@@ -79,7 +87,6 @@ app.delete(AppConfig.NEIGHBORS_ENDPOINT, (req, res) => {
                 Neighbors.push(new_neigh)
             }
         }
-        //if (VERBOSE) { console.log(`${NEIGHBORS_ENDPOINT} Leave network request accepted. Neighbors list updated.`) }
         Logger.log("NEIGH_LEAVE_ACCEPT")
         var status = 200
     }
@@ -100,7 +107,6 @@ app.put(AppConfig.NEIGHBORS_ENDPOINT, (req, res) => {
     const idx = Neighbors.indexOf(leaving_node)
     if (idx > -1) {
         Neighbors.splice(idx, 1)
-        if (VERBOSE) { console.log(`Removed leaving node ${leaving_node}`)}
     } else {
         console.warn("Leaving neighbor address not found. Possible error with request.")
     }
@@ -108,16 +114,13 @@ app.put(AppConfig.NEIGHBORS_ENDPOINT, (req, res) => {
 
     if (new_master != MY_ADDRESS) {
         CONNECT_TO_ADDR = new_master
-        //if (VERBOSE) { console.log(`Updated master to ${new_master}`) }
         Logger.log("NEIGH_MASTER_UPDATE", {"new_master" : new_master})
         if (!Neighbors.includes(new_master)) {
             // Probably should also add the new master to neighbors
             Neighbors.push(new_master);
         }
-        //if (VERBOSE) { console.log(`Set the new master as a neighbor.`) }
     } else {
         Logger.log("NEIGH_MASTER_SKIP")
-        //if (VERBOSE) { console.log(`Master not updated. It's me.`) }
     }
     res.status = 200
     res.send()
@@ -128,19 +131,15 @@ app.post(AppConfig.BROADCAST_ENDPOINT, (req, res) => {
     payload = req.body
 
     if (Message_hashes.includes(payload['hash'])) {
-        //if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${payload['hash']}: Skipping message, already received`) }
         Logger.log("BCAST_SKIP", {"payload_hash": payload["hash"]})
         var message = "Message already received"
         var status = 422
 
     } else {
         /*if (verify_message_hash(payload) != true) {
-            if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${payload['hash']}: Skipping message, hash verification failed `) }
-            
             var message = "Message hash verification failed, possible connection issue"
             var status = 400
         } else {*/
-            //if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${payload['hash']}: Processing message `) }
             Logger.log("BCAST_RECEIVE", {"payload_hash": payload["hash"]})
             let type = payload['type']
             Message_hashes.push(payload['hash'])
@@ -155,7 +154,6 @@ app.post(AppConfig.BROADCAST_ENDPOINT, (req, res) => {
                     process_block(payload)
                     break;
                 default:
-                    //if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${payload['hash']}: Unknown message type ${type}`) }
                     Logger.log("BCAST_UNKNOWN", {"payload_hash": payload["hash"], "type" : type})
                     var message = "Unknown message type"
                     var status = 400
@@ -172,7 +170,6 @@ app.post(AppConfig.BROADCAST_ENDPOINT, (req, res) => {
 function broadcast_message(payload) {
     tasks = []
     for (const neigh of Neighbors) {
-        //if (VERBOSE) { console.log(`${BROADCAST_ENDPOINT} ${payload['hash']}: Forwarding broadcast message to ${neigh}`) }
         Logger.log("BCAST_FORWARD", {"payload_hash": payload["hash"], "target": neigh})
         let url = neigh + AppConfig.BROADCAST_ENDPOINT
         tasks.push(send_message(url, payload, (status, data) => { /*console.log(url, status, data)*/ }))
@@ -182,8 +179,7 @@ function broadcast_message(payload) {
 
 async function process_transaction(payload) {
     Logger.log("TRAN_REC", {"transaction_data": JSON.stringify(payload['data'])})
-    //console.log(`Received transaction ${JSON.stringify(payload['data'])}`)
-    Transactions.push(payload)
+    PendingTransactions.set(payload['hash'], payload)
     tasks = broadcast_message(payload)
     if (MINER) {
         await Promise.all(tasks)
@@ -195,18 +191,23 @@ async function try_to_mine() {
     /* Async function check if miner node is busy and decides whether to start mining */
     //TODO future: terminate worker when new block arrives (same block or any?)
 
-    if (!BUSY_MINING && Transactions.length > 0) {
-        //if (VERBOSE) { console.log("Starting mining ", Transactions) }
-        Logger.log("MINE_START", {"transaction" : JSON.stringify(Transactions.at(-1)['data'])})
+    if (!BUSY_MINING && PendingTransactions.size > 0) {   
         BUSY_MINING = true
         block = create_block()
+        if (block == null){
+            BUSY_MINING=false
+            //console.log("No trans to mine")
+            return
+        }
+        Logger.log("MINE_START", {"transaction" : JSON.stringify(block['transaction']['data']), "tran_hash":block['transaction']['hash']})
         /*Start mining thread*/
         const worker = new Worker("./source/miner.js", { workerData: { block: block} });
         worker.once("message", async (result) => {
             block = result
             payload = prepare_payload("Block", block)
             Blocks.push(payload)
-            MinedTransactions.push(Transactions.pop())
+            BlocksMap.set(payload['hash'], Blocks.length)
+            PendingTransactions.delete(block['transaction']['hash'])
             Message_hashes.push(payload['hash'])
             //Broadcast new block - wait for broadcast to finish before moving on
             tasks = broadcast_message(payload)
@@ -227,23 +228,79 @@ async function try_to_mine() {
     }
 }
 
+function verify_transaction(tran){
+    try {
+        //Verify signature
+        verified = Crypto.verify(null, tran['hash'], tran['pk'], Buffer.from(tran['signature']))
+        if (!verified){
+            throw new Error("Incorrect signature. Removing incorrect transaction.")
+        }
+
+        //Verify sender id and pk
+        if (tran['data']['sender'] != Crypto.createHash(AppConfig.HASH_ALGO).update(tran['pk']).digest('hex')) {
+            console.warn("Sender is not the one signing!")
+            //SPECIAL CASE TODO FIX
+            //Never allow someone to sign for sender, use ATM hardcoded key to sign deposits
+            if (tran['data']['sender'] != "COINBASE"){
+                throw new Error("PK hash is not sender id. Removing incorrect transaction.")
+            } else {
+                verified = true
+            }
+        }
+        
+        //Verify sender bank account
+        acc = calculate_balance()
+        balance = acc.get(tran['data']['sender'])
+        if (balance==undefined | (parseFloat(balance) - parseFloat(tran['data']['amount']) < 0)){
+            throw new Error("Insufficient funds or unknown balance. Removing incorrect transaction.")
+        } else {
+            verified = true
+        }
+        
+    } catch (err) {
+        if (err instanceof Error) {
+            Logger.log("VERIFICATION_FAIL", {"reason": err.message, "tran_hash": tran['hash']})
+            PendingTransactions.delete(tran['hash'])
+            return false
+        }
+        console.warn(err)
+    }
+
+    return true
+}
+
 function create_block() {
     /* Create new block based on saved data */
-    block = {
-        //"prev_hash": Crypto.createHash(HASH_ALGO).update(JSON.stringify(Blocks.at(-1)['data'])).digest('hex'),
-        "prev_hash": Blocks.at(-1)['hash'],
-        "transaction": Transactions.at(0)['data'],
-        "nonce": 0,
-        "timestamp": Date.now()
+    let iter1 = PendingTransactions.values()
+    let tran
+    let verified = false
+    while (!verified && PendingTransactions.size>0){
+        tran = iter1.next().value
+        verified = verify_transaction(tran)
     }
-    return block
+    if (verified){
+        Logger.log("VERIFICATION_OK", {"tran_hash": tran['hash']})
+        block = {
+            //"prev_hash": Crypto.createHash(HASH_ALGO).update(JSON.stringify(Blocks.at(-1)['data'])).digest('hex'),
+            "prev_hash": Blocks.at(-1)['hash'],
+            "transaction": tran,
+            "nonce": 0,
+            "timestamp": Date.now()
+        }
+        return block
+    } else {
+        
+        return null
+    }
+    
 }
 
 function process_block(payload) {
     /*TODO move transacctions to mined transactions*/
     //TODO verify prev_hash corresponds to current data
-    Logger.log("BLOCK_REC", {"block_data": JSON.stringify(payload['data']), "block_hash": payload['hash']})
+    Logger.log("BLOCK_REC", {"prev_hash": JSON.stringify(payload['data']['prev_hash']), "block_hash": payload['hash']})
     Blocks.push(payload)
+    BlocksMap.set(payload['hash'], Blocks.length)
     broadcast_message(payload)
 }
 
@@ -261,11 +318,27 @@ app.get('/test_broadcast', (req, res) => {
         Message_hashes.push(payload['hash'])
         Logger.log("BCAST_START", {payload_hash: payload['hash']})
         process_transaction(payload)
-        //console.log("Broadcast initiated")
         res.send({ message: "Broadcast initiated" })
     }
 
 })
+
+app.post("/atm", (req, res) => {
+    //Receives transaction data
+    let data = req.body
+    let type = "Transaction"
+    let payload = req.body
+
+    if (!Message_hashes.includes(payload['hash'])) {
+        Message_hashes.push(payload['hash'])
+        Logger.log("BCAST_START", {payload_hash: payload['hash']})
+        process_transaction(payload)
+        res.send({ message: "Broadcast initiated" })
+    } else {
+        res.status(400)
+        res.send({message: "Transaction already known"})
+    }
+}) 
 
 app.post(AppConfig.REGISTER_ENDPOINT, (req, res) => {
     /*Register new node in the network*/
@@ -275,7 +348,6 @@ app.post(AppConfig.REGISTER_ENDPOINT, (req, res) => {
     //removed hash verification - useless?
     if (Neighbors.includes(addr)) {
         //If node already known skip
-        //if (VERBOSE) { console.log(REGISTER_ENDPOINT + ": Skipping " + addr + ". Already known.") }
         Logger.log("REGISTER_DUPLICATE")
         var message = "Already registered"
         var status = 422
@@ -283,7 +355,6 @@ app.post(AppConfig.REGISTER_ENDPOINT, (req, res) => {
         //If node unknown save
         Neighbors.push(addr)
         Logger.log("REGISTER_OK", {"address": addr})
-        //if (VERBOSE) { console.log(REGISTER_ENDPOINT + ": Adding " + addr + " to neighbors...") }
         var message = "Registered"
         var status = 201
 
@@ -305,7 +376,6 @@ app.get(AppConfig.JOIN_NET_ENDPOINT, (req, res) => {
     payload = prepare_payload("Handshake", data)
     Logger.log("SENT_HANDSHAKE", { "address": CONNECT_TO_ADDR })
     send_message(url, payload, (status, data) => {
-        //console.log(url, status, data)
         if (status==201){
             Logger.log("NET_JOINED", { "address": CONNECT_TO_ADDR })
         } else if (status==422) {
@@ -317,7 +387,6 @@ app.get(AppConfig.JOIN_NET_ENDPOINT, (req, res) => {
 });
 
 app.get(AppConfig.LEAVE_NET_ENDPOINT, (req, res) => {
-    //if (VERBOSE) { console.log("Attempting to leave network gracefully") }
     ATTEMPTING_TO_LEAVE = true
     Logger.log("LEAVE_START")
     let payload = Neighbors
@@ -330,14 +399,11 @@ app.get(AppConfig.LEAVE_NET_ENDPOINT, (req, res) => {
         })
         .then(function (resp) {
             resp_status = resp.status
-            //if (VERBOSE) { console.log("Received ", resp_status) }
             if (resp_status == 200) {
                 //Update neighbors with connection to your master
-                //if (VERBOSE) { console.log(`Received ${resp_status}. Informing neighbors`) }
                 Logger.log("LEAVE_ACCEPT")
                 for (const neigh of Neighbors) {
                     url = neigh + AppConfig.NEIGHBORS_ENDPOINT
-                    //if (VERBOSE) { console.log(`Updating master for ${neigh}`) }
                     Logger.log("LEAVE_MSG_NEIGH", {"target": neigh})
                     fetch(url,
                         {
@@ -436,6 +502,58 @@ app.get('/test_connection', (req, res) => {
     res.send("Test performed")
 });
 
+ function calculate_balance(){
+        acc = new Map()
+        genesis = Blocks.at(0)
+        acc.set('COINBASE', genesis['data']['transaction']['amount'])
+        blockchains = []
+
+        Blocks.slice(1, Blocks.length).forEach((block)=>{
+            hash = block['hash']
+            /*Connect to blockchain*/
+            prev_hash = block['data']['prev_hash']
+            if (prev_hash == "GENESIS"){
+                //First block after genesis
+                blockchains[0] = [genesis, block]
+            } else if (!BlocksMap.has(prev_hash)) {
+                //Unknown previous block
+                console.warn(`Unknown prev_hash for block `)
+                return
+            } else {
+                blockchains[0].push(block)
+            }
+
+            /*Process transactions*/
+            let tran = block['data']['transaction']
+            let sender = tran['data']['sender']
+            let receiver = tran['data']['receiver']
+            let amount = parseFloat(tran['data']['amount'])
+            let tran_type = tran["data"]['type']
+
+            if ( tran_type== "Standard" ){
+                if (!acc.has(sender)){
+                    console.warn(`Sender ${sender} unknown and its not deposit. Can't verify transaction`)
+                } else {
+                    acc.set(sender, parseFloat(acc.get(sender)) - amount)
+                }
+                if (!acc.has(receiver)){
+                    acc.set(receiver, amount)
+                } else {
+                    acc.set(receiver, parseFloat(acc.get(receiver)) + amount)
+                }
+            } else if (tran_type == "Deposit") {
+                if (acc.has(receiver)){
+                    acc.set(receiver, parseFloat(acc.get(receiver)) + amount)   
+                } else {
+                    //First deposit
+                    acc.set(receiver, amount)
+                }
+            }
+        })
+        return acc
+    
+}
+
 function test_connection(url, _callback) {
     /*
     Test connection by simple fetch url
@@ -452,7 +570,7 @@ function test_connection(url, _callback) {
 }
 
 /*Input parameters*/
-var port = 5000;
+var port = 5001;
 if (process.argv[2]) {
     port = parseInt(process.argv[2]);
 }
@@ -475,7 +593,10 @@ GENESIS = {
     "type": "Block",
     "data": {
         "prev_hash": "GENESIS",
-        "transaction": "GENESIS",
+        "transaction": {
+            type: "COINBASE",
+            amount: 100
+        },
         "nonce": 0,
         "timestamp": Date.now()
     },
@@ -485,7 +606,7 @@ GENESIS = {
 Blocks.push(GENESIS)
 
 //Artificial miner param - todo cli param
-CREATE_MINER = false
+CREATE_MINER = true
 if (CREATE_MINER) {
     if (port == 5001) {
         MINER = true
@@ -494,4 +615,5 @@ if (CREATE_MINER) {
 
 app.listen(port, () => {
     console.log(`Node server running: port ${port}`)
+    if (MINER) {try_to_mine()}
 })

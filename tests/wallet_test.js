@@ -5,6 +5,8 @@ Port necessary as parameter since each node should be represented by one unique 
 
 const port = 5000
 const Wallet = require('../source/Wallet')
+const Crypto = require('crypto')
+const AppConfig = require('../source/AppConfig.js')
 
 async function main(){
     console.log("Test start")
@@ -17,4 +19,13 @@ async function main(){
     await Wallet.login(db, "main", "ilovemoney").then( ([id,pk,sk]) => { console.log(pk, sk) })
 }
 
-main()
+async function test1(){
+    db = await Wallet.connect_db(5001)
+    await Wallet.load_wallet(db, recreate=false)
+    await Wallet.login(db, "main", "main").then( ([id,pk,sk]) => {
+        console.log(id, pk.export({'type':'pkcs1','format':'pem'})) 
+        console.log(Crypto.createHash(AppConfig.HASH_ALGO).update(pk.export({'type':'pkcs1','format':'pem'})).digest('hex'))})
+
+}
+test1()
+//main()

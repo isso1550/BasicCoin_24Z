@@ -122,6 +122,16 @@ var conf = {
         "endpoint": "NEIGHBORS_ENDPOINT",
         "message": "New master received. It's my adress - skipping",
     },
+    "VERIFICATION_OK": {
+        "style": chalk.greenBright,
+        "ts": chalk.bgRedBright,
+        "message": "Transaction verification passed",
+    },
+    "VERIFICATION_FAIL": {
+        "style": chalk.redBright,
+        "ts": chalk.bgRedBright,
+        "message": "Transaction verification failed",
+    },
     
 }
 
