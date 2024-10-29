@@ -62,10 +62,25 @@ var conf = {
         "endpoint": "BROADCAST_ENDPOINT",
         "message": "Received transaction",
     },
+    "TRAN_DENY_HASH": {
+        "style": chalk.redBright,
+        "endpoint": "BROADCAST_ENDPOINT",
+        "message": "Transaction denied. Incorrect hash",
+    },
     "BLOCK_REC": {
         "style": chalk.magenta,
         "endpoint": "BROADCAST_ENDPOINT",
         "message": "Received block",
+    },
+    "BLOCK_DENY_DIFF": {
+        "style": chalk.redBright,
+        "endpoint": "BROADCAST_ENDPOINT",
+        "message": "Block hash not corresponding to difficulty",
+    },
+    "BLOCK_DENY_HASH": {
+        "style": chalk.redBright,
+        "endpoint": "BROADCAST_ENDPOINT",
+        "message": "Block hash incorrect",
     },
     "MINED": {
         "style": chalk.greenBright,

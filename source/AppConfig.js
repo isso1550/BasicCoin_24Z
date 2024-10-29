@@ -13,7 +13,27 @@ CONFIG = {
     KEY_FORMAT : "pem",
     PK_TYPE : "spki",
     SK_TYPE : "pkcs8",
-    SK_CIPHER : 'aes-256-cbc'
+    SK_CIPHER : 'aes-256-cbc',
+
+    
+    GENESIS : {
+        "type": "Block",
+        "data": {
+            "prev_hash": "GENESIS",
+            "transaction": {
+                "data": {
+                    type: "Coinbase",
+                    sender: "COINBASE",
+                    receiver: "a00b7fb076ab2a2d7cf13b14852c0473b0888a81f7dbce6259af5aecf5881351",
+                    amount: 100
+                }
+                
+            },
+            "nonce": 0,
+            "timestamp": Date.now()
+        },
+        "hash": "GENESIS"
+    }
 }
 
 module.exports = CONFIG

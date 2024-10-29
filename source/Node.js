@@ -179,6 +179,18 @@ function broadcast_message(payload) {
 
 async function process_transaction(payload) {
     Logger.log("TRAN_REC", {"transaction_data": JSON.stringify(payload['data'])})
+    //Deny coinbase transactions
+    if (payload['data']['type'] == "Coinbase"){
+        return
+    }
+    //Verify cash
+    
+    data_hash = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(payload['data'])).digest('hex');
+    if (payload['hash'] != data_hash){
+        Logger.log("TRAN_DENY_HASH", {tran_hash: payload['hash'], expected_hash: data_hash})
+        return
+    }
+
     PendingTransactions.set(payload['hash'], payload)
     tasks = broadcast_message(payload)
     if (MINER) {
@@ -229,6 +241,10 @@ async function try_to_mine() {
 }
 
 function verify_transaction(tran){
+    /* Special case - always allow coinbase */
+    if (tran['data']['type'] == "Coinbase") {
+        return true
+    }
     try {
         //Verify signature
         verified = Crypto.verify(null, tran['hash'], tran['pk'], Buffer.from(tran['signature']))
@@ -239,19 +255,13 @@ function verify_transaction(tran){
         //Verify sender id and pk
         if (tran['data']['sender'] != Crypto.createHash(AppConfig.HASH_ALGO).update(tran['pk']).digest('hex')) {
             console.warn("Sender is not the one signing!")
-            //SPECIAL CASE TODO FIX
-            //Never allow someone to sign for sender, use ATM hardcoded key to sign deposits
-            if (tran['data']['sender'] != "COINBASE"){
-                throw new Error("PK hash is not sender id. Removing incorrect transaction.")
-            } else {
-                verified = true
-            }
+            throw new Error("PK hash is not sender id. Removing incorrect transaction.")
         }
         
         //Verify sender bank account
         acc = calculate_balance()
         balance = acc.get(tran['data']['sender'])
-        if (balance==undefined | (parseFloat(balance) - parseFloat(tran['data']['amount']) < 0)){
+        if (balance==undefined | (parseInt(balance) - parseInt(tran['data']['amount']) < 0)){
             throw new Error("Insufficient funds or unknown balance. Removing incorrect transaction.")
         } else {
             verified = true
@@ -296,8 +306,16 @@ function create_block() {
 }
 
 function process_block(payload) {
-    /*TODO move transacctions to mined transactions*/
     //TODO verify prev_hash corresponds to current data
+    data_hash = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(payload['data'])).digest('hex');
+    if (payload['hash'] != data_hash){
+        Logger.log("BLOCK_DENY_HASH", {block_hash: payload['hash'], expected_hash: data_hash})
+        return
+    }
+    if (!(data_hash.slice(0, AppConfig.DIFFICULTY) == "0".repeat(AppConfig.DIFFICULTY))){
+        Logger.log("BLOCK_DENY_DIFF", {difficulty: AppConfig.DIFFICULTY, block_hash: data_hash})
+        return
+    }
     Logger.log("BLOCK_REC", {"prev_hash": JSON.stringify(payload['data']['prev_hash']), "block_hash": payload['hash']})
     Blocks.push(payload)
     BlocksMap.set(payload['hash'], Blocks.length)
@@ -453,7 +471,6 @@ function prepare_payload(type, data, _callback) {
     }
     data_hash = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(data)).digest('hex');
     payload.hash = data_hash
-
     if (_callback) {
         _callback(payload)
     } else {
@@ -505,10 +522,10 @@ app.get('/test_connection', (req, res) => {
  function calculate_balance(){
         acc = new Map()
         genesis = Blocks.at(0)
-        acc.set('COINBASE', genesis['data']['transaction']['amount'])
+        //acc.set('COINBASE', genesis['data']['transaction']['amount'])
         blockchains = []
 
-        Blocks.slice(1, Blocks.length).forEach((block)=>{
+        Blocks.forEach((block)=>{
             hash = block['hash']
             /*Connect to blockchain*/
             prev_hash = block['data']['prev_hash']
@@ -524,28 +541,31 @@ app.get('/test_connection', (req, res) => {
             }
 
             /*Process transactions*/
+
             let tran = block['data']['transaction']
-            let sender = tran['data']['sender']
             let receiver = tran['data']['receiver']
-            let amount = parseFloat(tran['data']['amount'])
+            let amount = parseInt(tran['data']['amount'])
             let tran_type = tran["data"]['type']
+            
+            
 
             if ( tran_type== "Standard" ){
+                let sender = tran['data']['sender']
                 if (!acc.has(sender)){
                     console.warn(`Sender ${sender} unknown and its not deposit. Can't verify transaction`)
                 } else {
-                    acc.set(sender, parseFloat(acc.get(sender)) - amount)
+                    acc.set(sender, parseInt(acc.get(sender)) - amount)
                 }
                 if (!acc.has(receiver)){
                     acc.set(receiver, amount)
                 } else {
-                    acc.set(receiver, parseFloat(acc.get(receiver)) + amount)
+                    acc.set(receiver, parseInt(acc.get(receiver)) + amount)
                 }
-            } else if (tran_type == "Deposit") {
+            } else if (tran_type == "Coinbase") {
                 if (acc.has(receiver)){
-                    acc.set(receiver, parseFloat(acc.get(receiver)) + amount)   
+                    acc.set(receiver, parseInt(acc.get(receiver)) + amount)   
                 } else {
-                    //First deposit
+                    //First coinbase
                     acc.set(receiver, amount)
                 }
             }
@@ -588,22 +608,7 @@ if (process.argv[3]) {
 MY_ADDRESS = "http://localhost:" + port
 
 /* Hard coded GENESIS block */
-
-GENESIS = {
-    "type": "Block",
-    "data": {
-        "prev_hash": "GENESIS",
-        "transaction": {
-            type: "COINBASE",
-            amount: 100
-        },
-        "nonce": 0,
-        "timestamp": Date.now()
-    },
-    "hash": "GENESIS"
-
-}
-Blocks.push(GENESIS)
+Blocks.push(AppConfig.GENESIS)
 
 //Artificial miner param - todo cli param
 CREATE_MINER = true

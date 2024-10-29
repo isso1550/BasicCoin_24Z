@@ -112,30 +112,6 @@ if (argv[2]) {
         }
          
         return
-    } else if (argv[2] == "-d"){
-        /*
-        Currently deposits signed by receiver - fix by hardcoding ATM account
-        */
-        cmd = argv[2]
-        port = argv[3]
-        name = argv[4]
-        pwd = argv[5]
-        amount = argv[6]
-        try {
-            [port, name, pwd, amount].forEach(element => {
-                if (element==undefined){
-                    throw new Error(`Some parameters undefined`)
-                }
-            });
-            console.log("OK")
-            process_auto_command(cmd, [name, pwd, amount])
-        } catch (err){
-            console.warn(err)
-            console.log("ATM.js -d [port] [name] [pwd] [amount]")
-            //node .\source\ATM.js -t 5001 main main xd 12
-        }
-         
-        return
     } else {
         //Manual mode
         port = parseInt(argv[2]);
@@ -179,47 +155,6 @@ async function send_transaction(receiver, amount){
     payload.signature = Crypto.sign(null, payload['hash'], privateKey)
     
 
-
-    await fetch(`http://localhost:${port}/atm`,
-        {
-            method: "POST",
-            body: JSON.stringify(payload),
-            headers: { 'Content-type': 'application/json; charset=UTF-8' },
-        })
-        .then(function (resp) {
-            resp_status = resp.status
-            if (resp_status == 200){
-                console.log(payload)
-                console.log(chalk.bgGreenBright("Transaction sent"))
-            } else if (resp_status==400){
-                console.log(chalk.bgRedBright("Error while sending transaction. Transaction already known."))
-            } else {
-                console.log(resp.json())
-                console.log(chalk.bgRedBright("Uknown error while sending transaction. Try again"))
-            }
-        })
-        .catch((err) => {
-            console.warn(err)
-            console.log(chalk.bgRedBright("Uknown error while sending transaction. Try again"))
-        })
-}
-
-async function send_deposit(receiver, amount){
-    let data = {
-        "type": "Deposit",
-        "sender": "COINBASE",
-        "receiver": receiver,
-        "amount": amount,
-        "timestamp": Date.now()
-    }
-    payload = {
-        "type": "Transaction",
-        "data": data
-    }
-    data_hash = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(data)).digest('hex');
-    payload.hash = data_hash
-    payload.pk = publicKey.export({'type':AppConfig.PK_TYPE,'format':AppConfig.KEY_FORMAT})
-    payload.signature = Crypto.sign(null, payload['hash'], privateKey)
 
     await fetch(`http://localhost:${port}/atm`,
         {

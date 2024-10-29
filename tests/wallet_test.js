@@ -22,9 +22,9 @@ async function main(){
 async function test1(){
     db = await Wallet.connect_db(5001)
     await Wallet.load_wallet(db, recreate=false)
-    await Wallet.login(db, "main", "main").then( ([id,pk,sk]) => {
-        console.log(id, pk.export({'type':'pkcs1','format':'pem'})) 
-        console.log(Crypto.createHash(AppConfig.HASH_ALGO).update(pk.export({'type':'pkcs1','format':'pem'})).digest('hex'))})
+    await Wallet.login(db, "coinbase", "coinbase").then( ([id,pk,sk]) => {
+        console.log(id, pk.export({'type':'spki','format':'pem'})) 
+        console.log(Crypto.createHash(AppConfig.HASH_ALGO).update(pk.export({'type':'spki','format':'pem'})).digest('hex'))})
 
 }
 test1()
