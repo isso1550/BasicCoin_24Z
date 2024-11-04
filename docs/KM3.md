@@ -31,7 +31,11 @@ W węźle zapisywane są znaczące hashe wiadomości. W przypadku transakcji jes
 
 ## Obliczanie aktualnych sald na kontach
 
+Zaczynając od najnowszego bloku (uproszczenie, które zniknie w KM4 :) ) program wybiera z bloku prev_hash, odnajduje go w pamięci (korzysta z mapy hash -> idx czyli BlocksMap) itd. aż do dojścia do genesis. Aktualnie nie ma żadnych wyjątków, więc ew. napotkanie ścieżki, która nie kończy się genesis wyłącza node. Jeśli się uda to obraca utworzony ciąg i przechodzi przez transakcje od najstarszej do najnowszej obliczając stany kont (to już proste zadanie). 
 
+Aby dodać obsługę forków, orphan itd. należy lepiej przeanalizować wybór bloku startowego do szukania pełnego blockchainu (przechowywac id najnowszego w najdluzszej sciezce i aktualizowac? wybrac pierwszy jesli jest kilka o tej samej dlugosci?). Co zrobić kiedy najdłuższa gałąź ma brakujące bloki? (aktualnie nie może tak sie stac, bo program nie przyjmuje blokow bez znanego poprzednika - mozna to rozwinac o mechanizm odpytywania sasiadow czy ktos ma takiego poprzednika).
+
+Zamiast poszukiwania blockchainu można dodać strukturę, która będzie przechowywać go cały czas i w przpadku braku poprzednika odrzucać od razu po przyjęciu. 
 
 # Lista ogólnych pomysłów
 

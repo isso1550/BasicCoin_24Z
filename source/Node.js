@@ -327,7 +327,7 @@ function process_block(payload) {
     Message_hashes.push(payload['hash'])
     
     let passed = update_block_order(payload)
-    console.log(passed)
+    //console.log(passed)
     if (passed){
         Blocks.push(payload)
         update_blocksmap(payload)
