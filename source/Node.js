@@ -14,6 +14,7 @@ const app = express()
 const { Worker } = require('worker_threads')
 const Logger = require("./ConsoleLogger.js")
 const AppConfig = require('./AppConfig.js');
+const { exit } = require('process');
 app.use(express.json());
 
 
@@ -36,7 +37,8 @@ var Message_hashes = [];
 var Blocks = [];
 
 var BlocksMap = new Map();
-
+//hash -> idx in blocks array
+BlocksMap.set("GENESIS", 0)
 
 var PendingTransactions = new Map();
 
@@ -114,7 +116,7 @@ app.put(AppConfig.NEIGHBORS_ENDPOINT, (req, res) => {
 
     if (new_master != MY_ADDRESS) {
         CONNECT_TO_ADDR = new_master
-        Logger.log("NEIGH_MASTER_UPDATE", {"new_master" : new_master})
+        Logger.log("NEIGH_MASTER_UPDATE", { "new_master": new_master })
         if (!Neighbors.includes(new_master)) {
             // Probably should also add the new master to neighbors
             Neighbors.push(new_master);
@@ -131,7 +133,7 @@ app.post(AppConfig.BROADCAST_ENDPOINT, (req, res) => {
     payload = req.body
 
     if (Message_hashes.includes(payload['hash'])) {
-        Logger.log("BCAST_SKIP", {"payload_hash": payload["hash"]})
+        Logger.log("BCAST_SKIP", { "payload_hash": payload["hash"] })
         var message = "Message already received"
         var status = 422
 
@@ -140,24 +142,24 @@ app.post(AppConfig.BROADCAST_ENDPOINT, (req, res) => {
             var message = "Message hash verification failed, possible connection issue"
             var status = 400
         } else {*/
-            Logger.log("BCAST_RECEIVE", {"payload_hash": payload["hash"]})
-            let type = payload['type']
-            Message_hashes.push(payload['hash'])
+        Logger.log("BCAST_RECEIVE", { "payload_hash": payload["hash"] })
+        let type = payload['type']
+        //Message_hashes.push(payload['hash']) //przeniesione do funkcji typu process_x
 
-            var message = "Message processed"
-            var status = 200
-            switch (type) {
-                case "Transaction":
-                    process_transaction(payload)
-                    break;
-                case "Block":
-                    process_block(payload)
-                    break;
-                default:
-                    Logger.log("BCAST_UNKNOWN", {"payload_hash": payload["hash"], "type" : type})
-                    var message = "Unknown message type"
-                    var status = 400
-            }
+        var message = "Message processed"
+        var status = 200
+        switch (type) {
+            case "Transaction":
+                process_transaction(payload)
+                break;
+            case "Block":
+                process_block(payload)
+                break;
+            default:
+                Logger.log("BCAST_UNKNOWN", { "payload_hash": payload["hash"], "type": type })
+                var message = "Unknown message type"
+                var status = 400
+        }
         //}
     }
     resp = {
@@ -170,7 +172,7 @@ app.post(AppConfig.BROADCAST_ENDPOINT, (req, res) => {
 function broadcast_message(payload) {
     tasks = []
     for (const neigh of Neighbors) {
-        Logger.log("BCAST_FORWARD", {"payload_hash": payload["hash"], "target": neigh})
+        Logger.log("BCAST_FORWARD", { "payload_hash": payload["hash"], "target": neigh })
         let url = neigh + AppConfig.BROADCAST_ENDPOINT
         tasks.push(send_message(url, payload, (status, data) => { /*console.log(url, status, data)*/ }))
     }
@@ -178,19 +180,20 @@ function broadcast_message(payload) {
 }
 
 async function process_transaction(payload) {
-    Logger.log("TRAN_REC", {"transaction_data": JSON.stringify(payload['data'])})
+    Logger.log("TRAN_REC", { "transaction_data": JSON.stringify(payload['data']) })
     //Deny coinbase transactions
-    if (payload['data']['type'] == "Coinbase"){
+    if (payload['data']['type'] == "Coinbase") {
         return
     }
     //Verify cash
-    
+
     data_hash = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(payload['data'])).digest('hex');
-    if (payload['hash'] != data_hash){
-        Logger.log("TRAN_DENY_HASH", {tran_hash: payload['hash'], expected_hash: data_hash})
+    if (payload['hash'] != data_hash) {
+        Logger.log("TRAN_DENY_HASH", { tran_hash: payload['hash'], expected_hash: data_hash })
         return
     }
 
+    Message_hashes.push(payload['hash'])
     PendingTransactions.set(payload['hash'], payload)
     tasks = broadcast_message(payload)
     if (MINER) {
@@ -203,22 +206,26 @@ async function try_to_mine() {
     /* Async function check if miner node is busy and decides whether to start mining */
     //TODO future: terminate worker when new block arrives (same block or any?)
 
-    if (!BUSY_MINING && PendingTransactions.size > 0) {   
+    if (!BUSY_MINING && PendingTransactions.size > 0) {
         BUSY_MINING = true
         block = create_block()
-        if (block == null){
-            BUSY_MINING=false
+        if (block == null) {
+            BUSY_MINING = false
             //console.log("No trans to mine")
             return
         }
-        Logger.log("MINE_START", {"transaction" : JSON.stringify(block['transaction']['data']), "tran_hash":block['transaction']['hash']})
+        Logger.log("MINE_START", { "transaction": JSON.stringify(block['transaction']['data']), "tran_hash": block['transaction']['hash'] })
         /*Start mining thread*/
-        const worker = new Worker("./source/miner.js", { workerData: { block: block} });
+        const worker = new Worker("./source/miner.js", { workerData: { block: block } });
         worker.once("message", async (result) => {
             block = result
             payload = prepare_payload("Block", block)
+            
             Blocks.push(payload)
-            BlocksMap.set(payload['hash'], Blocks.length)
+            update_block_order(payload)
+            update_blocksmap(payload)
+
+
             PendingTransactions.delete(block['transaction']['hash'])
             Message_hashes.push(payload['hash'])
             //Broadcast new block - wait for broadcast to finish before moving on
@@ -240,7 +247,7 @@ async function try_to_mine() {
     }
 }
 
-function verify_transaction(tran){
+function verify_transaction(tran) {
     /* Special case - always allow coinbase */
     if (tran['data']['type'] == "Coinbase") {
         return true
@@ -248,7 +255,7 @@ function verify_transaction(tran){
     try {
         //Verify signature
         verified = Crypto.verify(null, tran['hash'], tran['pk'], Buffer.from(tran['signature']))
-        if (!verified){
+        if (!verified) {
             throw new Error("Incorrect signature. Removing incorrect transaction.")
         }
 
@@ -257,19 +264,19 @@ function verify_transaction(tran){
             console.warn("Sender is not the one signing!")
             throw new Error("PK hash is not sender id. Removing incorrect transaction.")
         }
-        
+
         //Verify sender bank account
         acc = calculate_balance()
         balance = acc.get(tran['data']['sender'])
-        if (balance==undefined | (parseInt(balance) - parseInt(tran['data']['amount']) < 0)){
+        if (balance == undefined | (parseInt(balance) - parseInt(tran['data']['amount']) < 0)) {
             throw new Error("Insufficient funds or unknown balance. Removing incorrect transaction.")
         } else {
             verified = true
         }
-        
+
     } catch (err) {
         if (err instanceof Error) {
-            Logger.log("VERIFICATION_FAIL", {"reason": err.message, "tran_hash": tran['hash']})
+            Logger.log("VERIFICATION_FAIL", { "reason": err.message, "tran_hash": tran['hash'] })
             PendingTransactions.delete(tran['hash'])
             return false
         }
@@ -284,12 +291,12 @@ function create_block() {
     let iter1 = PendingTransactions.values()
     let tran
     let verified = false
-    while (!verified && PendingTransactions.size>0){
+    while (!verified && PendingTransactions.size > 0) {
         tran = iter1.next().value
         verified = verify_transaction(tran)
     }
-    if (verified){
-        Logger.log("VERIFICATION_OK", {"tran_hash": tran['hash']})
+    if (verified) {
+        Logger.log("VERIFICATION_OK", { "tran_hash": tran['hash'] })
         block = {
             //"prev_hash": Crypto.createHash(HASH_ALGO).update(JSON.stringify(Blocks.at(-1)['data'])).digest('hex'),
             "prev_hash": Blocks.at(-1)['hash'],
@@ -299,27 +306,60 @@ function create_block() {
         }
         return block
     } else {
-        
+
         return null
     }
-    
+
 }
 
 function process_block(payload) {
     //TODO verify prev_hash corresponds to current data
     data_hash = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(payload['data'])).digest('hex');
-    if (payload['hash'] != data_hash){
-        Logger.log("BLOCK_DENY_HASH", {block_hash: payload['hash'], expected_hash: data_hash})
+    if (payload['hash'] != data_hash) {
+        Logger.log("BLOCK_DENY_HASH", { block_hash: payload['hash'], expected_hash: data_hash })
         return
     }
-    if (!(data_hash.slice(0, AppConfig.DIFFICULTY) == "0".repeat(AppConfig.DIFFICULTY))){
-        Logger.log("BLOCK_DENY_DIFF", {difficulty: AppConfig.DIFFICULTY, block_hash: data_hash})
+    if (!(data_hash.slice(0, AppConfig.DIFFICULTY) == "0".repeat(AppConfig.DIFFICULTY))) {
+        Logger.log("BLOCK_DENY_DIFF", { difficulty: AppConfig.DIFFICULTY, block_hash: data_hash })
         return
     }
-    Logger.log("BLOCK_REC", {"prev_hash": JSON.stringify(payload['data']['prev_hash']), "block_hash": payload['hash']})
-    Blocks.push(payload)
-    BlocksMap.set(payload['hash'], Blocks.length)
-    broadcast_message(payload)
+    Logger.log("BLOCK_REC", { "prev_hash": JSON.stringify(payload['data']['prev_hash']), "block_hash": payload['hash'] })
+    Message_hashes.push(payload['hash'])
+    
+    let passed = update_block_order(payload)
+    console.log(passed)
+    if (passed){
+        Blocks.push(payload)
+        update_blocksmap(payload)
+        broadcast_message(payload)
+    } else {
+        console.warn("Block not processed. Missing parent.")
+        exit(1)
+    }
+    
+}
+
+function update_blocksmap(payload) {
+    let data = payload['hash']
+    BlocksMap.set(data, Blocks.length-1)
+}
+
+function update_block_order(payload){
+    if (!BlocksMap.has(payload['data']['prev_hash'])){
+        //missing prev hash
+        payload['order'] = -1
+        return false
+    } else {
+        idx = BlocksMap.get(payload['data']['prev_hash'])
+        prev_order = parseInt(Blocks[idx]['order'])
+        if ((prev_order == undefined) | (prev_order == null)){
+            console.warn("Unknown order error")
+            exit(1)
+        } else {
+            payload['order'] = prev_order + 1
+        }
+    }
+    return true
 }
 
 app.get('/test_broadcast', (req, res) => {
@@ -334,7 +374,7 @@ app.get('/test_broadcast', (req, res) => {
 
     if (!Message_hashes.includes(payload['hash'])) {
         Message_hashes.push(payload['hash'])
-        Logger.log("BCAST_START", {payload_hash: payload['hash']})
+        Logger.log("BCAST_START", { payload_hash: payload['hash'] })
         process_transaction(payload)
         res.send({ message: "Broadcast initiated" })
     }
@@ -349,14 +389,14 @@ app.post("/atm", (req, res) => {
 
     if (!Message_hashes.includes(payload['hash'])) {
         Message_hashes.push(payload['hash'])
-        Logger.log("BCAST_START", {payload_hash: payload['hash']})
+        Logger.log("BCAST_START", { payload_hash: payload['hash'] })
         process_transaction(payload)
         res.send({ message: "Broadcast initiated" })
     } else {
         res.status(400)
-        res.send({message: "Transaction already known"})
+        res.send({ message: "Transaction already known" })
     }
-}) 
+})
 
 app.post(AppConfig.REGISTER_ENDPOINT, (req, res) => {
     /*Register new node in the network*/
@@ -372,7 +412,7 @@ app.post(AppConfig.REGISTER_ENDPOINT, (req, res) => {
     } else {
         //If node unknown save
         Neighbors.push(addr)
-        Logger.log("REGISTER_OK", {"address": addr})
+        Logger.log("REGISTER_OK", { "address": addr })
         var message = "Registered"
         var status = 201
 
@@ -394,12 +434,12 @@ app.get(AppConfig.JOIN_NET_ENDPOINT, (req, res) => {
     payload = prepare_payload("Handshake", data)
     Logger.log("SENT_HANDSHAKE", { "address": CONNECT_TO_ADDR })
     send_message(url, payload, (status, data) => {
-        if (status==201){
+        if (status == 201) {
             Logger.log("NET_JOINED", { "address": CONNECT_TO_ADDR })
-        } else if (status==422) {
+        } else if (status == 422) {
             Logger.log("NET_DUPLICATE")
         }
-        
+
         res.send(data)
     })
 });
@@ -422,7 +462,7 @@ app.get(AppConfig.LEAVE_NET_ENDPOINT, (req, res) => {
                 Logger.log("LEAVE_ACCEPT")
                 for (const neigh of Neighbors) {
                     url = neigh + AppConfig.NEIGHBORS_ENDPOINT
-                    Logger.log("LEAVE_MSG_NEIGH", {"target": neigh})
+                    Logger.log("LEAVE_MSG_NEIGH", { "target": neigh })
                     fetch(url,
                         {
                             method: "PUT",
@@ -519,59 +559,114 @@ app.get('/test_connection', (req, res) => {
     res.send("Test performed")
 });
 
- function calculate_balance(){
-        acc = new Map()
-        genesis = Blocks.at(0)
-        //acc.set('COINBASE', genesis['data']['transaction']['amount'])
-        blockchains = []
+function calculate_balance() {
+    acc = new Map()
+    stack = []
 
-        Blocks.forEach((block)=>{
-            hash = block['hash']
-            /*Connect to blockchain*/
-            prev_hash = block['data']['prev_hash']
-            if (prev_hash == "GENESIS"){
-                //First block after genesis
-                blockchains[0] = [genesis, block]
-            } else if (!BlocksMap.has(prev_hash)) {
-                //Unknown previous block
-                console.warn(`Unknown prev_hash for block `)
-                return
-            } else {
-                blockchains[0].push(block)
-            }
-
-            /*Process transactions*/
-
-            let tran = block['data']['transaction']
-            let receiver = tran['data']['receiver']
-            let amount = parseInt(tran['data']['amount'])
-            let tran_type = tran["data"]['type']
-            
-            
-
-            if ( tran_type== "Standard" ){
-                let sender = tran['data']['sender']
-                if (!acc.has(sender)){
-                    console.warn(`Sender ${sender} unknown and its not deposit. Can't verify transaction`)
-                } else {
-                    acc.set(sender, parseInt(acc.get(sender)) - amount)
-                }
-                if (!acc.has(receiver)){
-                    acc.set(receiver, amount)
-                } else {
-                    acc.set(receiver, parseInt(acc.get(receiver)) + amount)
-                }
-            } else if (tran_type == "Coinbase") {
-                if (acc.has(receiver)){
-                    acc.set(receiver, parseInt(acc.get(receiver)) + amount)   
-                } else {
-                    //First coinbase
-                    acc.set(receiver, amount)
-                }
-            }
-        })
-        return acc
+    //Pick block to start and rebuild blockchain defaults to latest received
+    blockchain = []
+    stack.push(Blocks.at(-1))
     
+    while (stack.length > 0){
+        
+        block = stack.pop()
+        blockchain.push(block)
+
+          //Put prev block into queue
+          if (BlocksMap.has(block['data']['prev_hash'])){
+            if (block['hash'] != "GENESIS"){
+                idx = BlocksMap.get(block['data']['prev_hash'])
+                stack.push(Blocks[idx])
+            }
+        } else if (block['hash'] != "GENESIS") {
+            //Missing blockchain start
+            console.warn("Missing blockchain start")
+            exit(1)     
+        }  
+    }
+   
+
+    if (blockchain.length >1 ) {
+        blockchain = blockchain.reverse()
+    }
+
+    /* Process blockchain */
+    blockchain.forEach((block) => {
+        let tran = block['data']['transaction']
+        let receiver = tran['data']['receiver']
+        let amount = parseInt(tran['data']['amount'])
+        let tran_type = tran["data"]['type']
+
+        if (tran_type == "Standard") {
+            let sender = tran['data']['sender']
+            if (!acc.has(sender)) {
+                console.warn(`Sender ${sender} unknown and its not deposit. Can't verify transaction`)
+            } else {
+                acc.set(sender, parseInt(acc.get(sender)) - amount)
+            }
+            if (!acc.has(receiver)) {
+                acc.set(receiver, amount)
+            } else {
+                acc.set(receiver, parseInt(acc.get(receiver)) + amount)
+            }
+        } else if (tran_type == "Coinbase") {
+            if (acc.has(receiver)) {
+                acc.set(receiver, parseInt(acc.get(receiver)) + amount)
+            } else {
+                //First coinbase
+                acc.set(receiver, amount)
+            }
+        }
+    });
+
+
+    /*Blocks.forEach((block) => {
+        hash = block['hash']
+        /*Connect to blockchain
+        prev_hash = block['data']['prev_hash']
+        if (prev_hash == "GENESIS") {
+            //First block after genesis
+            blockchains[0] = [genesis, block]
+        } else if (!BlocksMap.has(prev_hash)) {
+            //Unknown previous block
+            console.warn(`Unknown prev_hash for block `)
+            return
+        } else {
+            blockchains[0].push(block)
+        }
+
+        /*Process transactions
+
+        let tran = block['data']['transaction']
+        let receiver = tran['data']['receiver']
+        let amount = parseInt(tran['data']['amount'])
+        let tran_type = tran["data"]['type']
+
+
+
+        if (tran_type == "Standard") {
+            let sender = tran['data']['sender']
+            if (!acc.has(sender)) {
+                console.warn(`Sender ${sender} unknown and its not deposit. Can't verify transaction`)
+            } else {
+                acc.set(sender, parseInt(acc.get(sender)) - amount)
+            }
+            if (!acc.has(receiver)) {
+                acc.set(receiver, amount)
+            } else {
+                acc.set(receiver, parseInt(acc.get(receiver)) + amount)
+            }
+        } else if (tran_type == "Coinbase") {
+            if (acc.has(receiver)) {
+                acc.set(receiver, parseInt(acc.get(receiver)) + amount)
+            } else {
+                //First coinbase
+                acc.set(receiver, amount)
+            }
+        }
+    })*/
+    return acc
+
 }
 
 function test_connection(url, _callback) {
@@ -620,5 +715,5 @@ if (CREATE_MINER) {
 
 app.listen(port, () => {
     console.log(`Node server running: port ${port}`)
-    if (MINER) {try_to_mine()}
+    if (MINER) { try_to_mine() }
 })

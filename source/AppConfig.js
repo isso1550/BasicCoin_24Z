@@ -32,7 +32,8 @@ CONFIG = {
             "nonce": 0,
             "timestamp": Date.now()
         },
-        "hash": "GENESIS"
+        "hash": "GENESIS",
+        "order": 1
     }
 }
 
