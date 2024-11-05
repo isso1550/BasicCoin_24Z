@@ -3,3 +3,4 @@ node .\source\ATM.js -t 5001 coinbase coinbase d7efc89cec74445da79519622386c215b
 node .\source\ATM.js -t 5001 main main abc 2
 node .\source\ATM.js -t 5001 main main d7efc89cec74445da79519622386c215bb09142ed4cd01ea8b194a026294df43 4
 node .\source\ATM.js -t 5001 main main d7efc89cec74445da79519622386c215bb09142ed4cd01ea8b194a026294df43 10
+node .\source\ATM.js -t 5001 main main d7efc89cec74445da79519622386c215bb09142ed4cd01ea8b194a026294df43 1

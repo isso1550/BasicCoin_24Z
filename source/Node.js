@@ -28,6 +28,9 @@ var ORIGIN_MODE = false //ORIGIN = First node in network
 var MY_ADDRESS
 var CONNECT_TO_ADDR
 var ATTEMPTING_TO_LEAVE = false //Node is currently trying to leave
+var longest_path = 0
+
+var OLD_PREV_HASH_SWITCH = true
 
 //Stored data
 var Neighbors = [];
@@ -185,8 +188,7 @@ async function process_transaction(payload) {
     if (payload['data']['type'] == "Coinbase") {
         return
     }
-    //Verify cash
-
+    //Verify hash
     data_hash = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(payload['data'])).digest('hex');
     if (payload['hash'] != data_hash) {
         Logger.log("TRAN_DENY_HASH", { tran_hash: payload['hash'], expected_hash: data_hash })
@@ -216,16 +218,53 @@ async function try_to_mine() {
         }
         Logger.log("MINE_START", { "transaction": JSON.stringify(block['transaction']['data']), "tran_hash": block['transaction']['hash'] })
         /*Start mining thread*/
+
+        //Special case for testing consensus
+        if (block['transaction']['data']['receiver'] == "test1" && OLD_PREV_HASH_SWITCH ){
+            block['prev_hash'] = Blocks.at(3)['data']['prev_hash']
+        }
         const worker = new Worker("./source/miner.js", { workerData: { block: block } });
         worker.once("message", async (result) => {
             block = result
             payload = prepare_payload("Block", block)
+            payload['miner'] = port
+
+            //Special case for testing consensus
+            if (block['transaction']['data']['receiver'] == "test1" && OLD_PREV_HASH_SWITCH ){
+                console.warn("Testing special case")
+                    
+                OLD_PREV_HASH_SWITCH = false
+                tasks = broadcast_message(payload)
+                await Promise.all(tasks)
+                BUSY_MINING = false
+                return
+            }
             
-            Blocks.push(payload)
+            //Check whether transaction was mined by someone else during own mining
+            if (!PendingTransactions.has(block['transaction']['hash'])){
+                console.warn("Mined too late, transaction already mined ", block['transaction']['hash'], payload['hash'])
+                BUSY_MINING = false
+                try_to_mine()
+                return
+                
+            }
             update_block_order(payload)
+
+            //Check whether newly mined block creates longest path in blockchain
+            console.log(payload['order'], longest_path)
+            if (payload['order'] <= longest_path){
+                //if equal - soft fork
+                console.log(payload['data']['prev_hash'])
+                console.warn("Denying block - path is not the longest one")
+                //dont remove pending transaction
+                try_to_mine()
+                return
+                
+            }
+            longest_path = payload['order']
+            Blocks.push(payload)
             update_blocksmap(payload)
-
-
+            
             PendingTransactions.delete(block['transaction']['hash'])
             Message_hashes.push(payload['hash'])
             //Broadcast new block - wait for broadcast to finish before moving on
@@ -240,7 +279,7 @@ async function try_to_mine() {
             BUSY_MINING = false
         });
         worker.on("exit", exitCode => {
-            //console.warn(`It exited with code ${exitCode}`);
+            //console.warn(`It exited with code ${exitCode}`);  
             BUSY_MINING = false
         })
 
@@ -294,8 +333,9 @@ function create_block() {
     while (!verified && PendingTransactions.size > 0) {
         tran = iter1.next().value
         verified = verify_transaction(tran)
+        //verified = true //!!!!zlosliwy node
     }
-    if (verified) {
+    if (verified && PendingTransactions.has(tran['hash'])) {
         Logger.log("VERIFICATION_OK", { "tran_hash": tran['hash'] })
         block = {
             //"prev_hash": Crypto.createHash(HASH_ALGO).update(JSON.stringify(Blocks.at(-1)['data'])).digest('hex'),
@@ -313,7 +353,7 @@ function create_block() {
 }
 
 function process_block(payload) {
-    //TODO verify prev_hash corresponds to current data
+    //TODO verify prev_hash corresponds to current data?
     data_hash = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(payload['data'])).digest('hex');
     if (payload['hash'] != data_hash) {
         Logger.log("BLOCK_DENY_HASH", { block_hash: payload['hash'], expected_hash: data_hash })
@@ -323,18 +363,40 @@ function process_block(payload) {
         Logger.log("BLOCK_DENY_DIFF", { difficulty: AppConfig.DIFFICULTY, block_hash: data_hash })
         return
     }
-    Logger.log("BLOCK_REC", { "prev_hash": JSON.stringify(payload['data']['prev_hash']), "block_hash": payload['hash'] })
-    Message_hashes.push(payload['hash'])
+
+    if (!verify_transaction(payload['data']['transaction'])){
+        //TODO verify transaction based on corresponding fork/path
+        console.warn("Block deny. Transaction verification failed.")
+        return
+    }
+
+    
     
     let passed = update_block_order(payload)
     //console.log(passed)
     if (passed){
+        if (payload['order'] <= longest_path){
+            console.warn("Denying block - path is not the longest one")
+            //dont remove pending transaction - will be remined in more suiting block
+            return
+        }
+        longest_path = payload['order']
+        tran_hash = payload['data']['transaction']['hash']
+        if (!PendingTransactions.has(tran_hash)){
+            console.warn("Transaction is unknown or already mined")
+            return
+        }
+        PendingTransactions.delete(tran_hash)
+        console.warn("Attaching block as ", payload['order'])
+        
+        Logger.log("BLOCK_REC", { "prev_hash": JSON.stringify(payload['data']['prev_hash']), "block_hash": payload['hash'] })
+        Message_hashes.push(payload['hash'])
         Blocks.push(payload)
         update_blocksmap(payload)
         broadcast_message(payload)
     } else {
         console.warn("Block not processed. Missing parent.")
-        exit(1)
+        return
     }
     
 }
@@ -356,7 +418,7 @@ function update_block_order(payload){
             console.warn("Unknown order error")
             exit(1)
         } else {
-            payload['order'] = prev_order + 1
+            payload['order'] = prev_order +1
         }
     }
     return true
@@ -494,12 +556,6 @@ app.get(AppConfig.LEAVE_NET_ENDPOINT, (req, res) => {
             res.send()
         })
 })
-
-/*function verify_message_hash(body) {
-    received_hash = body['hash']
-    message_hash = Crypto.createHash(HASH_ALGO).update(JSON.stringify(body['data'])).digest('hex');
-    return message_hash == received_hash
-}*/
 
 function prepare_payload(type, data, _callback) {
     /*Prepare message content to match universal app standard
@@ -708,7 +764,7 @@ Blocks.push(AppConfig.GENESIS)
 //Artificial miner param - todo cli param
 CREATE_MINER = true
 if (CREATE_MINER) {
-    if (port == 5001) {
+    if (port == 5001 || port == 5002 || port == 5003) {
         MINER = true
     }
 }

@@ -1,3 +1,16 @@
+# Uwaga 05.11
+* aktualna implementacja nie zapewnia spojnosci
+* siec traci spojnosc kiedy wezel otrzyma rownie warty (pod katem dl. lancucha) blok podczas rozsylania wlasnego
+* przechowywac blockchain w postaci list zeby mozna bylo podlaczac rozgalezienia?
+* najwieksze problemy przy bardzo niskim difficulty - potrzebny jest taki sredni czas kopania zeby pozwolic wiadomosci na propagacje po sieci
+* dodac forki i przestarzale bloki do atm
+* w przypadku missing parent mozna podejrzewac ze wystapil hard fork - to na km4
+    *   czy reagowac na to pytaniem o tego rodzica?
+* dodac parametr - blok startowy przy obliczaniu kont -blokiem startowym jest koniec najdluzszego lancucha 
+* w przypadku soft forka wybierac ten ktory byl pierwszy, ale nie odrzucac nowszego bo galaz wciaz walczy o zycie
+* dodac wizualizacje blockchaina z galeziami przy uzyciu grafu
+
+
 # Zadanie 
 Transakcje przekazania środków (10p) (termin oddania: 10.12.2024 / 13.12.2024)
 * Tworzenie transakcji, np. w formacie json (pierwszą transakcją w liście powinna być transakcja coinbase tworząca nowe "monety")
@@ -36,6 +49,11 @@ Zaczynając od najnowszego bloku (uproszczenie, które zniknie w KM4 :) ) progra
 Aby dodać obsługę forków, orphan itd. należy lepiej przeanalizować wybór bloku startowego do szukania pełnego blockchainu (przechowywac id najnowszego w najdluzszej sciezce i aktualizowac? wybrac pierwszy jesli jest kilka o tej samej dlugosci?). Co zrobić kiedy najdłuższa gałąź ma brakujące bloki? (aktualnie nie może tak sie stac, bo program nie przyjmuje blokow bez znanego poprzednika - mozna to rozwinac o mechanizm odpytywania sasiadow czy ktos ma takiego poprzednika).
 
 Zamiast poszukiwania blockchainu można dodać strukturę, która będzie przechowywać go cały czas i w przpadku braku poprzednika odrzucać od razu po przyjęciu. 
+
+## Konsensus
+
+Dwóch kopaczy - jeśli nowy blok dołącza się do ścieżki, która nie jest najdłuższa to jest automatycznie odrzucany.
+
 
 # Lista ogólnych pomysłów
 
