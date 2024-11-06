@@ -24,13 +24,19 @@ app.use(express.json());
 //var VERBOSE = true
 var MINER = false
 var BUSY_MINING = false
+var MINED_TRAN_HASH = null
+var worker
+var SEND_OUTDATED_PREVHASH = false
+var SEND_FORKS = false
+
+
 var ORIGIN_MODE = false //ORIGIN = First node in network
 var MY_ADDRESS
 var CONNECT_TO_ADDR
 var ATTEMPTING_TO_LEAVE = false //Node is currently trying to leave
-var longest_path = 0
-
-var OLD_PREV_HASH_SWITCH = true
+var longest_chain = 0
+var longest_chain_endpoint = 0
+var CHAIN_ENDPOINTS = []
 
 //Stored data
 var Neighbors = [];
@@ -45,14 +51,17 @@ BlocksMap.set("GENESIS", 0)
 
 var PendingTransactions = new Map();
 
-
-
 app.get('/', (req, res) => {
     res.send('Hello World!')
 })
 
 app.get('/messages', (req, res) => {
     res.send(Message_hashes)
+})
+
+app.get('/mine', (req, res) => {
+    try_to_mine()
+    res.send("ok")
 })
 
 app.get('/pendingtransactions', (req, res) => {
@@ -69,6 +78,17 @@ app.get('/blocks', (req, res) => {
     res.send(Blocks)
 })
 
+app.get('/endpoints', (req, res) => {
+    console.log("LCE ", longest_chain_endpoint)
+    res.send(CHAIN_ENDPOINTS)
+})
+
+app.get('/reorder', (req, res) => {
+    find_orphans(0)
+    try_to_mine()
+    res.send("ok")
+})
+
 app.get('/balance', (req, res) => {
     ar = Array.from(calculate_balance(), ([name, value]) => ({ name, value }));
     res.send(ar)
@@ -76,6 +96,29 @@ app.get('/balance', (req, res) => {
 
 app.get(AppConfig.NEIGHBORS_ENDPOINT, (req, res) => {
     res.send(Neighbors)
+})
+
+app.get("/vis", (req, res) => {
+    bstring = ""
+    bcount = 0
+    cstring = ""
+    Blocks.forEach((block)=>{
+        tran = block['data']['transaction']['data']
+        title = `${tran['sender'].slice(0,6)} to ${tran['receiver'].slice(0,6)} with ${tran['amount'] } by ${block['miner']}`
+
+        bstring = bstring +  `{ id: ${bcount}, label: "${bcount}: ${block['hash'].slice(0,8)}", title: "${title}"  }, \n`
+
+        if (BlocksMap.has(block['data']['prev_hash'])){
+            cstring = cstring + `{ from: ${bcount}, to: ${BlocksMap.get(block['data']['prev_hash'])}} , \n`
+            
+        } else {
+            console.log("/vis missing prev hash")
+        }
+        bcount += 1
+    })
+    code = AppConfig.VISHTML[0] + bstring + AppConfig.VISHTML[1] + cstring + AppConfig.VISHTML[2]
+    res.set('Content-Type', 'text/html');
+    res.send(Buffer.from(code));
 })
 
 app.delete(AppConfig.NEIGHBORS_ENDPOINT, (req, res) => {
@@ -204,10 +247,70 @@ async function process_transaction(payload) {
     }
 }
 
+function find_orphans(threshold=1){
+    console.warn("Starting reorganization")
+    orphans = []
+    /*
+    Check if endpoint fell back further than steps (based on threshold)
+    default to 1, so orphan if fell back for 2+ steps
+    */
+    CHAIN_ENDPOINTS.forEach((ep_idx) => {
+        if (Blocks[ep_idx]['order'] < longest_chain-threshold){
+            orphans.push(Blocks[ep_idx])
+        }
+    })
+
+    main_chain = get_blockchain(Blocks[longest_chain_endpoint], as_index=true)
+    console.log(main_chain)
+
+    orphans.forEach((ob) => {
+        /*
+        For each orphan re-add transactions to pending list and repeat for parent
+        until no more parents (found genesis) or dropped chain joins current main_chain
+        */
+        console.log(`Dropping orphan ${ob['hash']}`)
+        PendingTransactions.set(ob['data']['transaction']['hash'], ob['data']['transaction'])
+        ob_idx = CHAIN_ENDPOINTS.indexOf(BlocksMap.get(ob['hash']))
+        console.log("pre_delete ", CHAIN_ENDPOINTS)
+        CHAIN_ENDPOINTS.splice(ob_idx, 1)
+        console.log("post delete ", CHAIN_ENDPOINTS)
+
+        idx = BlocksMap.get(ob['data']['prev_hash'])
+        prev_block = Blocks[idx]
+        //Repeat for parents
+        while(prev_block['hash'] != "GENESIS" && main_chain.indexOf(idx)==-1){
+            console.log(idx, main_chain.indexOf(idx))
+            console.log(`Dropping orphan parent ${prev_block['hash']}`)
+
+            /*
+            Re-add transactions at the front with assumption that they are older and should be processed
+            earlier to maintain dependencies
+            */
+            m = new Map()
+            m.set(prev_block['data']['transaction']['hash'], prev_block['data']['transaction'])
+            let it = PendingTransactions.entries()
+            while(true) {
+                data = it.next().value
+                if (data == undefined){
+                    break;
+                }
+                m.set(data[0], data[1])
+            }
+
+            //Prepare next iteration
+            PendingTransactions = m
+            idx = BlocksMap.get(prev_block['data']['prev_hash'])
+            if (idx == undefined || idx==null){
+                console.warn("Error in searching for trans. One of the blocks has missing parents. Possible hard fork")
+            } else {
+                prev_block = Blocks[idx]
+            }
+        }
+    })
+}
+
 async function try_to_mine() {
     /* Async function check if miner node is busy and decides whether to start mining */
-    //TODO future: terminate worker when new block arrives (same block or any?)
-
     if (!BUSY_MINING && PendingTransactions.size > 0) {
         BUSY_MINING = true
         block = create_block()
@@ -217,29 +320,15 @@ async function try_to_mine() {
             return
         }
         Logger.log("MINE_START", { "transaction": JSON.stringify(block['transaction']['data']), "tran_hash": block['transaction']['hash'] })
+       
         /*Start mining thread*/
-
-        //Special case for testing consensus
-        if (block['transaction']['data']['receiver'] == "test1" && OLD_PREV_HASH_SWITCH ){
-            block['prev_hash'] = Blocks.at(3)['data']['prev_hash']
-        }
-        const worker = new Worker("./source/miner.js", { workerData: { block: block } });
+        MINED_TRAN_HASH = block['transaction']['hash']
+        worker = new Worker("./source/miner.js", { workerData: { block: block } });
         worker.once("message", async (result) => {
             block = result
             payload = prepare_payload("Block", block)
             payload['miner'] = port
 
-            //Special case for testing consensus
-            if (block['transaction']['data']['receiver'] == "test1" && OLD_PREV_HASH_SWITCH ){
-                console.warn("Testing special case")
-                    
-                OLD_PREV_HASH_SWITCH = false
-                tasks = broadcast_message(payload)
-                await Promise.all(tasks)
-                BUSY_MINING = false
-                return
-            }
-            
             //Check whether transaction was mined by someone else during own mining
             if (!PendingTransactions.has(block['transaction']['hash'])){
                 console.warn("Mined too late, transaction already mined ", block['transaction']['hash'], payload['hash'])
@@ -248,45 +337,32 @@ async function try_to_mine() {
                 return
                 
             }
-            update_block_order(payload)
-
-            //Check whether newly mined block creates longest path in blockchain
-            console.log(payload['order'], longest_path)
-            if (payload['order'] <= longest_path){
-                //if equal - soft fork
-                console.log(payload['data']['prev_hash'])
-                console.warn("Denying block - path is not the longest one")
-                //dont remove pending transaction
-                try_to_mine()
-                return
+            saved = save_block(payload)
+            if (saved){
+                tasks = broadcast_message(payload)
+                await Promise.all(tasks)
                 
             }
-            longest_path = payload['order']
-            Blocks.push(payload)
-            update_blocksmap(payload)
-            
-            PendingTransactions.delete(block['transaction']['hash'])
-            Message_hashes.push(payload['hash'])
-            //Broadcast new block - wait for broadcast to finish before moving on
-            tasks = broadcast_message(payload)
-            await Promise.all(tasks)
+            MINED_TRAN_HASH = null
             BUSY_MINING = false
-            //Try mining next one
             try_to_mine()
+            
         });
         worker.on("error", error => {
             console.warn(error);
+            MINED_TRAN_HASH = null
             BUSY_MINING = false
         });
         worker.on("exit", exitCode => {
             //console.warn(`It exited with code ${exitCode}`);  
+            MINED_TRAN_HASH = null
             BUSY_MINING = false
         })
 
     }
 }
 
-function verify_transaction(tran) {
+function verify_transaction(tran, payload=undefined) {
     /* Special case - always allow coinbase */
     if (tran['data']['type'] == "Coinbase") {
         return true
@@ -304,8 +380,23 @@ function verify_transaction(tran) {
             throw new Error("PK hash is not sender id. Removing incorrect transaction.")
         }
 
-        //Verify sender bank account
-        acc = calculate_balance()
+        /*
+        Verify sender bank account
+        Specifying payload allows to check balance for any moment/any branch starting with it
+        When checking current_balance payload should be last SAVED block from the path, path without currently analyzed transaction
+        */
+        if (payload != undefined){
+            let parent = Blocks[BlocksMap.get(payload['data']['prev_hash'])]
+            if (parent==undefined){
+                console.warn("Missing parent")
+            }
+            acc = calculate_balance(parent)
+        } else {
+            acc = calculate_balance()
+        }
+        if(acc == null){
+            throw new Error("Missing parent, hard fork possible.")
+        }
         balance = acc.get(tran['data']['sender'])
         if (balance == undefined | (parseInt(balance) - parseInt(tran['data']['amount']) < 0)) {
             throw new Error("Insufficient funds or unknown balance. Removing incorrect transaction.")
@@ -333,13 +424,38 @@ function create_block() {
     while (!verified && PendingTransactions.size > 0) {
         tran = iter1.next().value
         verified = verify_transaction(tran)
-        //verified = true //!!!!zlosliwy node
+        //verified = true //!!!!scammer node
     }
+
     if (verified && PendingTransactions.has(tran['hash'])) {
         Logger.log("VERIFICATION_OK", { "tran_hash": tran['hash'] })
+
+        /*Additional options to cause more forks/outdated blocks for testing*/
+        if (SEND_OUTDATED_PREVHASH){
+            if (longest_chain>2){
+                prev_hash = Blocks[longest_chain_endpoint-2]['hash']
+            } else {
+                prev_hash = Blocks[0]['hash']
+            }
+            
+        } else if (SEND_FORKS){
+            if (longest_chain > 2){
+                prev_block_idx = BlocksMap.get(Blocks[longest_chain_endpoint]['data']['prev_hash'])
+                prev_block = Blocks[prev_block_idx]
+                prev_hash = prev_block['hash']
+            } else {
+                prev_hash = Blocks[longest_chain_endpoint]['hash']
+            }
+        
+        /*
+        Additional options end
+        Main logic in else {}
+        */
+        } else {
+            prev_hash = Blocks[longest_chain_endpoint]['hash']
+        }
         block = {
-            //"prev_hash": Crypto.createHash(HASH_ALGO).update(JSON.stringify(Blocks.at(-1)['data'])).digest('hex'),
-            "prev_hash": Blocks.at(-1)['hash'],
+            "prev_hash": prev_hash,
             "transaction": tran,
             "nonce": 0,
             "timestamp": Date.now()
@@ -353,7 +469,6 @@ function create_block() {
 }
 
 function process_block(payload) {
-    //TODO verify prev_hash corresponds to current data?
     data_hash = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(payload['data'])).digest('hex');
     if (payload['hash'] != data_hash) {
         Logger.log("BLOCK_DENY_HASH", { block_hash: payload['hash'], expected_hash: data_hash })
@@ -364,54 +479,126 @@ function process_block(payload) {
         return
     }
 
-    if (!verify_transaction(payload['data']['transaction'])){
-        //TODO verify transaction based on corresponding fork/path
+    if(!BlocksMap.has(payload['data']['prev_hash'])){
+        console.warn("Parent not found. Possible hard fork.")
+    }
+
+    if (!verify_transaction(payload['data']['transaction'], payload)){
+        //TODO verify transaction based on corresponding fork/path?
         console.warn("Block deny. Transaction verification failed.")
         return
     }
 
     
-    
+
+    saved = save_block(payload)
+    if (saved){
+        if (BUSY_MINING && MINED_TRAN_HASH == payload['data']['transaction']['hash']){
+            /*
+            Abandon mining if newly saved block includes same transaction
+            */
+            console.warn("DISABLE THREAD")
+            worker.terminate()
+        }
+        broadcast_message(payload)
+    }
+}
+
+function save_block(payload){
+    if (!BlocksMap.has(payload['data']['prev_hash'])){
+        console.warn("Possible HARD FORK")
+    } else {
+        /*
+        Verify if new transaction is unknown in current chain 
+        */
+        console.warn("VERIFY for tran ", payload['data']['transaction']['hash'])
+        tran_found = false
+        idx = BlocksMap.get(payload['data']['prev_hash'])
+        prev_block = Blocks[idx]
+        while(tran_found == false && prev_block['hash'] != "GENESIS"){
+            if (prev_block['data']['transaction']['hash'] == payload['data']['transaction']['hash']){
+                tran_found = true
+            }
+            idx = BlocksMap.get(prev_block['data']['prev_hash'])
+            if (idx == undefined || idx==null){
+                console.warn("Error in searching for trans. One of the blocks has missing parents.")
+            } else {
+                prev_block = Blocks[idx]
+            }
+        }
+        if (tran_found){
+            console.warn("Transaction already in this chain")
+            PendingTransactions.delete(payload['data']['transaction']['hash'])
+            return false
+        }
+    }
+
     let passed = update_block_order(payload)
-    //console.log(passed)
     if (passed){
-        if (payload['order'] <= longest_path){
-            console.warn("Denying block - path is not the longest one")
+        if (payload['order'] < longest_chain-1){
+            console.warn("Denying block - path is too old")
             //dont remove pending transaction - will be remined in more suiting block
             return
         }
-        longest_path = payload['order']
-        tran_hash = payload['data']['transaction']['hash']
-        if (!PendingTransactions.has(tran_hash)){
-            console.warn("Transaction is unknown or already mined")
-            return
+        let new_longest = false
+        if (payload['order'] == longest_chain){
+            /* If new block order is the same as max it means temporary fork has been created*/
+            console.warn("SOFT_FORK")
+        } else if (payload['order'] > longest_chain){
+            /* New block is one&only longest path*/
+            new_longest = true
         }
+        longest_chain = payload['order']
+
+        tran_hash = payload['data']['transaction']['hash']
         PendingTransactions.delete(tran_hash)
-        console.warn("Attaching block as ", payload['order'])
-        
+
+        console.warn("Attaching block with order ", payload['order']) 
         Logger.log("BLOCK_REC", { "prev_hash": JSON.stringify(payload['data']['prev_hash']), "block_hash": payload['hash'] })
+        
         Message_hashes.push(payload['hash'])
         Blocks.push(payload)
+        if (new_longest){
+            /* Update only for new longest - favors older blocks (mined quicker) */
+            longest_chain_endpoint = Blocks.indexOf(payload)
+        }
+
+        /*
+        Update endpoints
+        */
+        parent_idx = BlocksMap.get(payload['data']['prev_hash'])
+        endpoint_idx = CHAIN_ENDPOINTS.indexOf(parent_idx)
+        if (endpoint_idx != -1){
+            //Parent is an endpoint - remove parent before adding
+            CHAIN_ENDPOINTS.splice(endpoint_idx, 1)
+            CHAIN_ENDPOINTS.push(Blocks.indexOf(payload))
+            console.log(`Replacing endpoint ${Blocks[parent_idx]['hash'].slice(0,6)} with ${payload['hash'].slice(0,6)}`)
+        } else {
+            //Parent is part of other chain, add current block as new endpoint
+            CHAIN_ENDPOINTS.push(Blocks.indexOf(payload))
+            console.log(`Adding endpoint ${payload['hash'].slice(0,6)}`)
+        }
         update_blocksmap(payload)
-        broadcast_message(payload)
+        find_orphans()
+        return true
     } else {
         console.warn("Block not processed. Missing parent.")
-        return
+        return false
     }
-    
 }
 
 function update_blocksmap(payload) {
     let data = payload['hash']
-    BlocksMap.set(data, Blocks.length-1)
+    BlocksMap.set(data, Blocks.indexOf(payload))
 }
 
 function update_block_order(payload){
     if (!BlocksMap.has(payload['data']['prev_hash'])){
-        //missing prev hash
+        //Missing prev hash
         payload['order'] = -1
         return false
     } else {
+        //Get previous block and set order as 1 more
         idx = BlocksMap.get(payload['data']['prev_hash'])
         prev_order = parseInt(Blocks[idx]['order'])
         if ((prev_order == undefined) | (prev_order == null)){
@@ -615,37 +802,52 @@ app.get('/test_connection', (req, res) => {
     res.send("Test performed")
 });
 
-function calculate_balance() {
-    acc = new Map()
-    stack = []
-
-    //Pick block to start and rebuild blockchain defaults to latest received
-    blockchain = []
-    stack.push(Blocks.at(-1))
+function get_blockchain(start/*Block full message*/, as_index=false){
+    /*
+    Return blockchain starting from start block
+    if as_index returns blockchain as list of indices of blocks in Blocks obj
+    */
+    let blockchain = []
+    stack.push(start)
     
     while (stack.length > 0){
         
         block = stack.pop()
-        blockchain.push(block)
-
-          //Put prev block into queue
-          if (BlocksMap.has(block['data']['prev_hash'])){
+        if(as_index){
+            blockchain.push(BlocksMap.get(block['hash']))
+        } else {
+            blockchain.push(block)
+        }
+        //Put prev block into queue
+        if (BlocksMap.has(block['data']['prev_hash'])){
             if (block['hash'] != "GENESIS"){
                 idx = BlocksMap.get(block['data']['prev_hash'])
                 stack.push(Blocks[idx])
             }
         } else if (block['hash'] != "GENESIS") {
-            //Missing blockchain start
-            console.warn("Missing blockchain start")
-            exit(1)     
+            console.warn("Missing one of the parents for block ", start)
+            return null   
         }  
     }
-   
-
+    //Reverse to get Genesis -> leaf order
     if (blockchain.length >1 ) {
         blockchain = blockchain.reverse()
     }
+    return blockchain
+}
 
+function calculate_balance(start=undefined) {
+    acc = new Map()
+    stack = []
+
+    if (start == undefined){
+        start=Blocks[longest_chain_endpoint]
+    }
+    blockchain = get_blockchain(start)
+    if (blockchain == null){
+        return null
+    }
+    
     /* Process blockchain */
     blockchain.forEach((block) => {
         let tran = block['data']['transaction']
@@ -674,53 +876,6 @@ function calculate_balance() {
             }
         }
     });
-
-
-    /*Blocks.forEach((block) => {
-        hash = block['hash']
-        /*Connect to blockchain
-        prev_hash = block['data']['prev_hash']
-        if (prev_hash == "GENESIS") {
-            //First block after genesis
-            blockchains[0] = [genesis, block]
-        } else if (!BlocksMap.has(prev_hash)) {
-            //Unknown previous block
-            console.warn(`Unknown prev_hash for block `)
-            return
-        } else {
-            blockchains[0].push(block)
-        }
-
-        /*Process transactions
-
-        let tran = block['data']['transaction']
-        let receiver = tran['data']['receiver']
-        let amount = parseInt(tran['data']['amount'])
-        let tran_type = tran["data"]['type']
-
-
-
-        if (tran_type == "Standard") {
-            let sender = tran['data']['sender']
-            if (!acc.has(sender)) {
-                console.warn(`Sender ${sender} unknown and its not deposit. Can't verify transaction`)
-            } else {
-                acc.set(sender, parseInt(acc.get(sender)) - amount)
-            }
-            if (!acc.has(receiver)) {
-                acc.set(receiver, amount)
-            } else {
-                acc.set(receiver, parseInt(acc.get(receiver)) + amount)
-            }
-        } else if (tran_type == "Coinbase") {
-            if (acc.has(receiver)) {
-                acc.set(receiver, parseInt(acc.get(receiver)) + amount)
-            } else {
-                //First coinbase
-                acc.set(receiver, amount)
-            }
-        }
-    })*/
     return acc
 
 }
@@ -766,6 +921,11 @@ CREATE_MINER = true
 if (CREATE_MINER) {
     if (port == 5001 || port == 5002 || port == 5003) {
         MINER = true
+    }
+    //Annoying node - send forks on purpose
+    if (port == 5001){
+        SEND_OUTDATED_PREVHASH = false
+        SEND_FORKS = false
     }
 }
 
