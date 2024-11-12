@@ -38,6 +38,8 @@ var longest_chain = 0
 var longest_chain_endpoint = 0
 var CHAIN_ENDPOINTS = []
 
+var coinbase_verified //verify coinbase block only once
+
 //Stored data
 var Neighbors = [];
 //TODO: hashes stored in one array, but details in appropriate 
@@ -365,7 +367,8 @@ async function try_to_mine() {
 function verify_transaction(tran, payload=undefined) {
     /* Special case - always allow coinbase */
     if (tran['data']['type'] == "Coinbase") {
-        return true
+        //Dont accept coinbase transactions - first one is built-in so will work anyway - 12.11
+        return false
     }
     try {
         //Verify signature
@@ -476,6 +479,13 @@ function process_block(payload) {
     }
     if (!(data_hash.slice(0, AppConfig.DIFFICULTY) == "0".repeat(AppConfig.DIFFICULTY))) {
         Logger.log("BLOCK_DENY_DIFF", { difficulty: AppConfig.DIFFICULTY, block_hash: data_hash })
+        return
+    }
+
+    //Tran hash verify - 12.11
+    data_hash = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(payload['data']['transaction']['data'])).digest('hex');
+    if (payload['data']['transaction']['hash'] != data_hash) {
+        Logger.log("TRAN_DENY_HASH", { tran_hash: payload['hash'], expected_hash: data_hash })
         return
     }
 
