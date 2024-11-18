@@ -1,3 +1,5 @@
+::Classic 6 node - check docs for graph
+
 start node source/Node.js 5000 INIT &
 start node source/Node.js 5001 http://localhost:5000 &
 start node source/Node.js 5002 http://localhost:5001 &

@@ -4,8 +4,10 @@ CONFIG = {
     NEIGHBORS_ENDPOINT : "/neighbors",
     JOIN_NET_ENDPOINT : "/join_network",
     LEAVE_NET_ENDPOINT: "/leave_network",
-    
-    DIFFICULTY : 3,
+    GET_PARENT_ENDPOINT: "/parent",
+    VISUALIZATION_ENDPOINT: "/vis",
+
+    DIFFICULTY : 0,
 
     HASH_ALGO : "sha256",
     KEY_ALGO : "rsa",
