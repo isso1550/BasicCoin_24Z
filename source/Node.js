@@ -46,6 +46,7 @@ var longest_chain = 0 //Length as number
 var longest_chain_endpoint = 0 //Blocks list index ...
 var CHAIN_ENDPOINTS = [] //Blocks list index for each leaf block
 var PAUSE = false //pause broadcasting messages
+var DELETE_ORPHANS = true
 
 //Stored data
 //TODO?: hashes stored in one array, but details in appropriate 
@@ -316,6 +317,7 @@ function find_orphans(threshold=1){
     */
     CHAIN_ENDPOINTS.forEach((ep_idx) => {
         if (Blocks[ep_idx]['order'] < longest_chain-threshold){
+            console.log("Orphan detected ", Blocks[ep_idx]['order'], longest_chain)
             orphans.push(Blocks[ep_idx])
         }
     })
@@ -327,13 +329,25 @@ function find_orphans(threshold=1){
         For each orphan re-add transactions to pending list and repeat for parent
         until no more parents (found genesis) or dropped chain joins current main_chain
         */
-        //console.log(`Dropping orphan ${ob['hash']}`)
-        PendingTransactions.set(ob['data']['transaction']['hash'], ob['data']['transaction'])
-        ob_idx = CHAIN_ENDPOINTS.indexOf(BlocksMap.get(ob['hash']))
-        //console.log("pre_delete ", CHAIN_ENDPOINTS)
-        CHAIN_ENDPOINTS.splice(ob_idx, 1)
-        //console.log("post delete ", CHAIN_ENDPOINTS)
 
+        //Add Transaction in front
+        m = new Map()
+            m.set(ob['data']['transaction']['hash'], ob['data']['transaction'])
+            let it = PendingTransactions.entries()
+            while(true) {
+                data = it.next().value
+                if (data == undefined){
+                    break;
+                }
+                m.set(data[0], data[1])
+            }
+        PendingTransactions = m
+
+
+        //Delete from endpoints list
+        ob_idx = CHAIN_ENDPOINTS.indexOf(BlocksMap.get(ob['hash']))
+        CHAIN_ENDPOINTS.splice(ob_idx, 1)
+        
         idx = BlocksMap.get(ob['data']['prev_hash'])
         prev_block = Blocks[idx]
         /*
@@ -358,12 +372,13 @@ function find_orphans(threshold=1){
                 }
                 m.set(data[0], data[1])
             }
+            PendingTransactions = m
 
             //Prepare next iteration
-            PendingTransactions = m
             idx = BlocksMap.get(prev_block['data']['prev_hash'])
             if (idx == undefined || idx==null){
-                console.warn("Error in searching for trans. One of the blocks has missing parents. Possible hard fork")
+                //Never happens
+                throw Error("Error in searching for trans. One of the blocks has missing parents. Possible hard fork")
             } else {
                 prev_block = Blocks[idx]
             }
@@ -460,6 +475,7 @@ function verify_transaction(tran, payload=undefined) {
             acc = calculate_balance()
         }
         if(acc == null){
+            //Should never launch - error for safety
             throw new Error("Missing parent, hard fork possible.")
         }
         balance = acc.get(tran['data']['sender'])
@@ -554,18 +570,18 @@ function process_block(payload, syncing=false) {
     data_hash = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(payload['data'])).digest('hex');
     if (payload['hash'] != data_hash) {
         Logger.log("BLOCK_DENY_HASH", { block_hash: payload['hash'], expected_hash: data_hash })
-        return
+        return false
     }
     //Correct difficulty
     if (!(data_hash.slice(0, AppConfig.DIFFICULTY) == "0".repeat(AppConfig.DIFFICULTY))) {
         Logger.log("BLOCK_DENY_DIFF", { difficulty: AppConfig.DIFFICULTY, block_hash: data_hash })
-        return
+        return false
     }
     //Transaction hash correct
     data_hash = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(payload['data']['transaction']['data'])).digest('hex');
     if (payload['data']['transaction']['hash'] != data_hash) {
         Logger.log("TRAN_DENY_HASH", { tran_hash: payload['hash'], expected_hash: data_hash })
-        return
+        return false
     }
 
     //Previous block exists
@@ -599,13 +615,13 @@ function process_block(payload, syncing=false) {
                     console.warn(err)
                 })
         }   
-        return //handle current block later, alternative is to wait for sync_chain to end by modifying code 
+        return false//handle current block later, alternative is to wait for sync_chain to end by modifying code 
     }
 
     //Transaction valid in terms of details and balances
     if (!verify_transaction(payload['data']['transaction'], payload)){
         console.warn("Block deny. Transaction verification failed.")
-        return
+        return false
     }
 
     //Block OK, save and forward
@@ -621,7 +637,7 @@ function process_block(payload, syncing=false) {
         if (!syncing){
             broadcast_message(payload)
         }
-        
+        return true
     }
 }
 
@@ -667,7 +683,11 @@ function sync_chain(chain){
             console.log("Processing block ", b['hash'])
             if (!BlocksMap.has(b['hash'])){
                 //Syncing = true, guarantees method won't broadcast message
-                process_block(b, syncing=true)
+                r = process_block(b, syncing=true)
+                if (!r){
+                    console.log("Block incorrect. Syncing stopped")
+                    break;
+                }
             }
                     
         }   
@@ -684,7 +704,7 @@ function save_block(payload, syncing=false){
     */
 
     if (!BlocksMap.has(payload['data']['prev_hash'])){
-        //Never happens
+        //Never happens - error for safety
         throw Error("Save block: Possible HARD FORK")
     } else {
         /*
@@ -701,7 +721,8 @@ function save_block(payload, syncing=false){
             }
             idx = BlocksMap.get(prev_block['data']['prev_hash'])
             if (idx == undefined || idx==null){
-                console.warn("Error in searching for trans. One of the blocks has missing parents.")
+                //Never happens 
+                throw Error("Error in searching for trans. One of the blocks has missing parents.")
             } else {
                 prev_block = Blocks[idx]
             }
@@ -783,7 +804,9 @@ function save_block(payload, syncing=false){
             console.log(`Adding endpoint ${payload['hash'].slice(0,6)}`)
         }
         update_blocksmap(payload)
-        find_orphans()
+        if (!syncing) {
+            find_orphans()
+        }
         return true
     } else {
         console.warn("Block not processed. Missing parent.")
