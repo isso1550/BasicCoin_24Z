@@ -585,7 +585,7 @@ function process_block(payload, syncing=false) {
     }
 
     //Previous block exists
-    if(!BlocksMap.has(payload['data']['prev_hash'])){
+    if(!BlocksMap.has(payload['data']['prev_hash']) && !syncing){
     /*
     Missing parent - hard fork handling
     Ask neighbor for entire blockchain from genesis to current block -> pass to sync_chain
