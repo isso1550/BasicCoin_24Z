@@ -7,7 +7,7 @@ CONFIG = {
     GET_PARENT_ENDPOINT: "/parent",
     VISUALIZATION_ENDPOINT: "/vis",
 
-    DIFFICULTY : 2,
+    DIFFICULTY : 3,
 
     HASH_ALGO : "sha256",
     KEY_ALGO : "rsa",

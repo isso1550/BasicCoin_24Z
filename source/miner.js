@@ -7,11 +7,11 @@ const Crypto = require('crypto');
 
 if (!isMainThread) {
     var HASH_ALGO = AppConfig.HASH_ALGO
-    var DIFFICULTY = AppConfig.DIFFICULTY
-    parentPort.postMessage(mine(workerData.block));
+    //var DIFFICULTY = AppConfig.DIFFICULTY
+    parentPort.postMessage(mine(workerData.block, workerData.difficulty));
 }
 
-function mine(block){
+function mine(block, DIFFICULTY=AppConfig.DIFFICULTY){
     hash = Crypto.createHash(HASH_ALGO).update(JSON.stringify(block)).digest('hex');
     n = 0
     while (!(hash.slice(0, DIFFICULTY) == "0".repeat(DIFFICULTY))){

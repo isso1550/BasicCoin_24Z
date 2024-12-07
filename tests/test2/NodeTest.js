@@ -1,12 +1,10 @@
-
-
-
+const p = '../../source/'
 const Crypto = require('crypto');
-const express = require('express');
+const express = require(p+'node_modules/express');
 const app = express()
 const { Worker } = require('worker_threads')
-const Logger = require("./ConsoleLogger.js")
-const AppConfig = require('./AppConfig.js');
+const Logger = require(p+"ConsoleLogger.js")
+const AppConfig = require(p+'AppConfig.js');
 const { exit } = require('process');
 app.use(express.json());
 
@@ -49,7 +47,7 @@ var PendingTransactions = new Map();
 
 
 /*
-Endpoints for testing and validation - should be deleted in production
+Endpoints for testing and validation
 */
 
 app.get('/', (req, res) => {
@@ -65,8 +63,6 @@ app.get('/mine', (req, res) => {
     res.send("ok")
 })
 
-/* Public for test purposes
-    in production should be hidden and handled by console for safety */
 app.get('/pause', (req, res) => {
     if (PAUSE){
         console.log("Resumed")
@@ -210,7 +206,17 @@ app.get(AppConfig.GET_PARENT_ENDPOINT, (req, res) => {
 
 app.post(AppConfig.BROADCAST_ENDPOINT, (req, res) => {
     if (PAUSE){
-        res.send() //remove to cause infinite response
+        //TEST2 Param
+        res.status(200) 
+        resp = {
+            message: 'Message processed'
+        }
+        //remove above to simulate malfunction
+
+
+        res.send(resp) 
+        //remove above to cause infinite response
+        
         return
     }
     // NOTE: It also resends the message back from where it came from
@@ -283,12 +289,6 @@ async function process_transaction(payload) {
         Logger.log("TRAN_DENY_HASH", { tran_hash: payload['hash'], expected_hash: data_hash })
         return
     }
-    //Verify signature
-    verified = Crypto.verify(null, payload['hash'], payload['pk'], Buffer.from(payload['signature']))
-        if (!verified) {
-            Logger.log("VERIFICATION_FAIL", { "reason": "Transaction signature invalid", "tran_hash": payload['hash'] })
-            return
-        }
 
     Message_hashes.push(payload['hash'])
     PendingTransactions.set(payload['hash'], payload)
@@ -396,8 +396,11 @@ async function try_to_mine() {
         Logger.log("MINE_START", { "transaction": JSON.stringify(block['transaction']['data']), "tran_hash": block['transaction']['hash'] })
        
         /*Start mining thread*/
+
         MINED_TRAN_HASH = block['transaction']['hash']
-        worker = new Worker("./source/miner.js", { workerData: { block: block } });
+
+        worker = new Worker(p+"miner.js", { workerData: { block: block} });
+        
         worker.once("message", async (result) => {
             block = result
             payload = prepare_payload("Block", block)
@@ -903,8 +906,8 @@ app.get(AppConfig.JOIN_NET_ENDPOINT, (req, res) => {
     })
 });
 
-/* Public for test purposes
-    in production should be hidden and handled by console for safety */
+
+
 app.get(AppConfig.LEAVE_NET_ENDPOINT, (req, res) => {
     /* Gracefully leaving the network - maintains connection, possibly outdated */
     ATTEMPTING_TO_LEAVE = true
@@ -941,6 +944,9 @@ app.get(AppConfig.LEAVE_NET_ENDPOINT, (req, res) => {
                 }
                 res.send("Requests sent succesfully, network left.")
                 Logger.log("LEAVE_END")
+                console.log(Neighbors)
+                PAUSE=true
+                //can wait for async calls to end and exit(0)
                 //console.warn("Network left. Close program now...")
 
             } else if (resp_status == 503) {
@@ -1010,7 +1016,6 @@ function get_blockchain(start/*Block full message*/, as_index=false){
     Return blockchain starting from start block
     if as_index returns blockchain as list of indices of blocks in Blocks obj
     */
-    stack = []
     let blockchain = []
     stack.push(start)
     
@@ -1149,7 +1154,7 @@ if (CREATE_MINER) {
     //Annoying node - send forks on purpose
     if (port == 5001){
         SEND_OUTDATED_PREVHASH = false
-        SEND_FORKS = false
+        SEND_FORKS = false 
     }
 }
 

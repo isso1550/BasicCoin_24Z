@@ -1,12 +1,10 @@
-
-
-
+const p = '../../source/'
 const Crypto = require('crypto');
-const express = require('express');
+const express = require(p+'node_modules/express');
 const app = express()
 const { Worker } = require('worker_threads')
-const Logger = require("./ConsoleLogger.js")
-const AppConfig = require('./AppConfig.js');
+const Logger = require(p+"ConsoleLogger.js")
+const AppConfig = require(p+'AppConfig.js');
 const { exit } = require('process');
 app.use(express.json());
 
@@ -49,7 +47,7 @@ var PendingTransactions = new Map();
 
 
 /*
-Endpoints for testing and validation - should be deleted in production
+Endpoints for testing and validation
 */
 
 app.get('/', (req, res) => {
@@ -65,8 +63,6 @@ app.get('/mine', (req, res) => {
     res.send("ok")
 })
 
-/* Public for test purposes
-    in production should be hidden and handled by console for safety */
 app.get('/pause', (req, res) => {
     if (PAUSE){
         console.log("Resumed")
@@ -290,6 +286,11 @@ async function process_transaction(payload) {
             return
         }
 
+    if (port == 5001){
+        //payload['data']['amount'] = 2*payload['data']['amount'] //TEST4 Param - double and rehash
+        //payload['hash'] = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(payload['data'])).digest('hex') 
+    }
+
     Message_hashes.push(payload['hash'])
     PendingTransactions.set(payload['hash'], payload)
     tasks = broadcast_message(payload)
@@ -397,7 +398,9 @@ async function try_to_mine() {
        
         /*Start mining thread*/
         MINED_TRAN_HASH = block['transaction']['hash']
-        worker = new Worker("./source/miner.js", { workerData: { block: block } });
+        worker = new Worker(p+"miner.js", { workerData: { block: block} });
+
+        
         worker.once("message", async (result) => {
             block = result
             payload = prepare_payload("Block", block)
@@ -437,6 +440,9 @@ async function try_to_mine() {
 }
 
 function verify_transaction(tran, payload=undefined) {
+    if (port == 5001){
+        //return true //TEST4 Param - accept all
+    }
     /* Verify details and assure sufficient balance */
 
     //Never accept coinbase
@@ -507,7 +513,6 @@ function create_block() {
     while (!verified && PendingTransactions.size > 0) {
         tran = iter1.next().value
         verified = verify_transaction(tran)
-        //verified = true //!!!!scammer node
     }
 
     //Assure transaction verified and still available
@@ -619,6 +624,13 @@ function process_block(payload, syncing=false) {
     if (!verify_transaction(payload['data']['transaction'], payload)){
         console.warn("Block deny. Transaction verification failed.")
         return false
+    }
+
+
+    if (port == 5001){
+        payload['data']['nonce'] = 0 //TEST4 Param - modify block, doesnt launch when 5001 is miner
+        payload['hash'] = Crypto.createHash(AppConfig.HASH_ALGO).update(JSON.stringify(payload['data'])).digest('hex') 
+        payload['hash'] = '0000000000fdbotrbpaeyrearyeyerayareyear' //difficult "hash"
     }
 
     //Block OK, save and forward
@@ -903,8 +915,6 @@ app.get(AppConfig.JOIN_NET_ENDPOINT, (req, res) => {
     })
 });
 
-/* Public for test purposes
-    in production should be hidden and handled by console for safety */
 app.get(AppConfig.LEAVE_NET_ENDPOINT, (req, res) => {
     /* Gracefully leaving the network - maintains connection, possibly outdated */
     ATTEMPTING_TO_LEAVE = true
@@ -1010,8 +1020,8 @@ function get_blockchain(start/*Block full message*/, as_index=false){
     Return blockchain starting from start block
     if as_index returns blockchain as list of indices of blocks in Blocks obj
     */
-    stack = []
     let blockchain = []
+    stack = []
     stack.push(start)
     
     while (stack.length > 0){
@@ -1143,13 +1153,13 @@ Blocks.push(AppConfig.GENESIS)
 //Artificial miner param - todo cli param
 CREATE_MINER = true
 if (CREATE_MINER) {
-    if (port == 5001 || port == 5002 || port == 5003 || port == 5004) {
+    if (port == 5000 || port == 5004) {
         MINER = true
     }
     //Annoying node - send forks on purpose
     if (port == 5001){
         SEND_OUTDATED_PREVHASH = false
-        SEND_FORKS = false
+        SEND_FORKS = false //TEST1 Param
     }
 }
 
