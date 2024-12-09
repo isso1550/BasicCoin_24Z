@@ -11,3 +11,6 @@
 * skopiowac do jakiegokolwiek nodetest i wywolac
 * nie ma nodetest w folderze zeby zmniejszyc redundancje + test bardzo prosty
 # 4 Nieuczciwy węzeł - akceptacja wszystkiego
+# 5 Udany atak na hash
+# 6 Czy baza danych na pewno przechowuje zaszyfrowany klucz?
+# 7 Błędne żądania
