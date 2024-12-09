@@ -12,5 +12,8 @@
 * nie ma nodetest w folderze zeby zmniejszyc redundancje + test bardzo prosty
 # 4 Nieuczciwy węzeł - akceptacja wszystkiego
 # 5 Udany atak na hash
+* symulacja przez odłączenie weryfikacji
 # 6 Czy baza danych na pewno przechowuje zaszyfrowany klucz?
+* porównanie z zaszyfrowaną i jawną postacią klucza
 # 7 Błędne żądania
+* dużo testów, tabela w sprawozdaniu
