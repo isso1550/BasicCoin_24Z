@@ -36,7 +36,7 @@ function groupByMiner(blocks) {
   return minerCounts;
 }
 
-const url = 'http://localhost:5003/blocks';
+const url = 'http://localhost:5002/blocks';
 fetchData(url, (err, blocks) => {
   if (err) {
     console.error('Error fetching data:', err);

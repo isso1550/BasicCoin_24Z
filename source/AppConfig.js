@@ -7,15 +7,18 @@ CONFIG = {
     GET_PARENT_ENDPOINT: "/parent",
     VISUALIZATION_ENDPOINT: "/vis",
 
-    DIFFICULTY : 3,
+    DIFFICULTY : 4,
 
     HASH_ALGO : "sha256",
     KEY_ALGO : "rsa",
+    KEY_ALGO_EC : 'ec',
+    NAMED_CURVE : 'secp384r1',
     KEY_MODULUS_LEN : 4096,
     KEY_FORMAT : "pem",
     PK_TYPE : "spki",
     SK_TYPE : "pkcs8",
     SK_CIPHER : 'aes-256-cbc',
+    //SK_CIPHER: 'aes-256-gcm',
 
     
     GENESIS : {
@@ -26,7 +29,8 @@ CONFIG = {
                 "data": {
                     type: "Coinbase",
                     sender: "COINBASE",
-                    receiver: "a00b7fb076ab2a2d7cf13b14852c0473b0888a81f7dbce6259af5aecf5881351",
+                    //receiver: "a00b7fb076ab2a2d7cf13b14852c0473b0888a81f7dbce6259af5aecf5881351", //RSA
+                    receiver: '2711b03fc52465664c66cc8c8879146e6c827e98fdda96315e75666e1830e44e',//EC
                     amount: 100
                 }
                 

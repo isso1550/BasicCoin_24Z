@@ -65,5 +65,4 @@
             * nie usuwaj blokow orphan bo ze wzgledu na asynchronicznosc moga byc problemy
 * jesli ta transakcja byla w miedzyczasie kopana to przerwij kopaczowi
 * broadcast dalej
-* transakcja konczy jako zaakceptowana (przynajmniej narazie 😀 )
 

@@ -47,7 +47,7 @@ var PendingTransactions = new Map();
 
 
 /*
-Endpoints for testing and validation
+Endpoints for testing and validation - should be deleted in production
 */
 
 app.get('/', (req, res) => {
@@ -63,6 +63,8 @@ app.get('/mine', (req, res) => {
     res.send("ok")
 })
 
+/* Public for test purposes
+    in production should be hidden and handled by console for safety */
 app.get('/pause', (req, res) => {
     if (PAUSE){
         console.log("Resumed")
@@ -268,8 +270,6 @@ async function process_transaction(payload) {
     Validates structure and basic hashes -> broadcast forward
     */
 
-    
-
     Logger.log("TRAN_REC", { "transaction_data": JSON.stringify(payload['data']) })
     if (payload['data']['type'] == "Coinbase") {
         //Deny coinbase transactions
@@ -281,6 +281,12 @@ async function process_transaction(payload) {
         Logger.log("TRAN_DENY_HASH", { tran_hash: payload['hash'], expected_hash: data_hash })
         return
     }
+    //Verify signature
+    verified = Crypto.verify(null, payload['hash'], payload['pk'], Buffer.from(payload['signature']))
+        if (!verified) {
+            Logger.log("VERIFICATION_FAIL", { "reason": "Transaction signature invalid", "tran_hash": payload['hash'] })
+            return
+        }
 
     Message_hashes.push(payload['hash'])
     PendingTransactions.set(payload['hash'], payload)
@@ -388,20 +394,8 @@ async function try_to_mine() {
         Logger.log("MINE_START", { "transaction": JSON.stringify(block['transaction']['data']), "tran_hash": block['transaction']['hash'] })
        
         /*Start mining thread*/
-
-        /* TEST1 param
-        default DIFFICULTY itself is important
-        for higher difficulty randomness is more important during search
-        for diff 2 + 2 total domination
-        for diff 5 + 2 works decently
-        */
         MINED_TRAN_HASH = block['transaction']['hash']
-        if (port != 5001){
-            worker = new Worker(p+"miner.js", { workerData: { block: block, difficulty:AppConfig.DIFFICULTY + 0 } });
-        } else {
-            worker = new Worker(p+"miner.js", { workerData: { block: block} });
-        }
-        
+        worker = new Worker("../../source/miner.js", { workerData: { block: block } });
         worker.once("message", async (result) => {
             block = result
             payload = prepare_payload("Block", block)
@@ -523,10 +517,10 @@ function create_block() {
         */
 
         if (SEND_OUTDATED_PREVHASH){
-            if (longest_chain>3){ //TEST1 Param - old previous block
-                prev_hash = Blocks[longest_chain_endpoint-3]['hash'] 
+            if (longest_chain>2){
+                prev_hash = Blocks[longest_chain_endpoint-2]['hash']
             } else {
-                prev_hash = Blocks[longest_chain_endpoint]['hash']
+                prev_hash = Blocks[0]['hash']
             }
             
         } else if (SEND_FORKS){
@@ -547,17 +541,6 @@ function create_block() {
             //Pick longest path's endpoint as prev_hash
             prev_hash = Blocks[longest_chain_endpoint]['hash']
         }
-
-        if (port == 5001){
-            //TEST1 Param Mal2 - fork on purpose for own spendings 51% attack
-            if (tran['data']['sender'] == '305679b5cc4e3bf39f40bf114826900d01af44e444240931b33b0e6a26334d30'){
-                prev_block_idx = BlocksMap.get(Blocks[longest_chain_endpoint]['data']['prev_hash'])
-                prev_block = Blocks[prev_block_idx]
-                prev_hash = prev_block['hash']
-                console.log("MALICIOUS 1", prev_hash, Blocks[longest_chain_endpoint]['hash'])
-            }
-        }
-
         block = {
             "prev_hash": prev_hash,
             "transaction": tran,
@@ -665,7 +648,7 @@ function sync_chain(chain){
     
 
     //New chain is too short to be accepted - if it changes later, sync_chain will be caused again
-    if (chain.length < longest_chain-1){ //TEST1 fix <= instead of <
+    if (chain.length < longest_chain-1){
         console.warn("New chain is too short: ", chain.length, " ", longest_chain)
         return
     }
@@ -714,7 +697,6 @@ function save_block(payload, syncing=false){
     /*
     Saves block in memory
     */
-    
 
     if (!BlocksMap.has(payload['data']['prev_hash'])){
         //Never happens - error for safety
@@ -754,7 +736,7 @@ function save_block(payload, syncing=false){
     //Block accepted, update order
     let passed = update_block_order(payload)
     if (passed){
-        if (payload['order'] < longest_chain-1){  //TEST1 fix <= instead of <
+        if (payload['order'] < longest_chain-1){
             if (syncing){
                 /*
                 During syncing, blocks will be attached from oldest to newest
@@ -762,7 +744,6 @@ function save_block(payload, syncing=false){
                 */
             } else {
                 //Deny try to attack block to other old blocks - prevent forks
-                //PendingTransactions.delete(tran_hash) // test1 warning - without this line infinite loop for malicious miner
                 console.warn("Denying block - path is too old")
                 return
             }
@@ -799,30 +780,8 @@ function save_block(payload, syncing=false){
         Blocks.push(payload)
         if (new_longest){
             /* Update only for new longest - favors older blocks (mined quicker) */
-            //TEST1 Param Mal2 - save chain without own spending as the main one
-            if (port == 5001){
-                start=Blocks[longest_chain_endpoint]
-                blockchain = get_blockchain(start)
-                accept = true
-                blockchain.forEach((block) => {
-                    let tran = block['data']['transaction']
-                    if (tran['sender'] == '305679b5cc4e3bf39f40bf114826900d01af44e444240931b33b0e6a26334d30'){
-                        accept = false
-                    }
-                })
-                if (accept){
-                    longest_chain_endpoint = Blocks.indexOf(payload)
-                } else {
-                    
-                }
-
-            } else {
-                longest_chain_endpoint = Blocks.indexOf(payload)
-            }
-            
+            longest_chain_endpoint = Blocks.indexOf(payload)
         }
-
-        
 
         /*
         Update chain endpoints
@@ -942,6 +901,8 @@ app.get(AppConfig.JOIN_NET_ENDPOINT, (req, res) => {
     })
 });
 
+/* Public for test purposes
+    in production should be hidden and handled by console for safety */
 app.get(AppConfig.LEAVE_NET_ENDPOINT, (req, res) => {
     /* Gracefully leaving the network - maintains connection, possibly outdated */
     ATTEMPTING_TO_LEAVE = true
@@ -1011,6 +972,11 @@ function prepare_payload(type, data, _callback) {
     }
 }
 async function send_message(url, payload, _callback, retries = 3) {
+    //TEST9 Param
+    if (url.includes(':5004')){
+        return
+    }
+
     /*Send payload to url using POST*/
     return fetch(url,
         {
@@ -1047,6 +1013,7 @@ function get_blockchain(start/*Block full message*/, as_index=false){
     Return blockchain starting from start block
     if as_index returns blockchain as list of indices of blocks in Blocks obj
     */
+    stack = []
     let blockchain = []
     stack.push(start)
     
@@ -1179,13 +1146,19 @@ Blocks.push(AppConfig.GENESIS)
 //Artificial miner param - todo cli param
 CREATE_MINER = true
 if (CREATE_MINER) {
-    if (port == 5001 || port == 5002 || port == 5003 || port == 5004) {
+    if (port == 5001 || port == 5004) {
         MINER = true
     }
     //Annoying node - send forks on purpose
     if (port == 5001){
-        SEND_OUTDATED_PREVHASH = false //TEST1 Param - send outdated blocks on purpose
-        SEND_FORKS = false //TEST1 Param - send temp forks on purpose
+        SEND_OUTDATED_PREVHASH = false
+        SEND_FORKS = false
+    }
+
+    if ([5002,5003].includes(port)){
+        MALICIOUS = true
+    } else {
+        MALICIOUS = false
     }
 }
 

@@ -12,4 +12,5 @@ curl 127.0.0.1:5002/join_network
 curl 127.0.0.1:5003/join_network
 curl 127.0.0.1:5004/join_network
 
+::Run in powershell
 Invoke-WebRequest -Uri http://localhost:5001/neighbors -Method Delete -Body "[`"http://localhost:5008`"]" -ContentType "application/json"

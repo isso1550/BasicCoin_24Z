@@ -1,6 +1,6 @@
 const prompt = require("prompt-sync")({ sigint: true });
 const Crypto = require("crypto")
-const Wallet = require("./Wallet.js")
+const Wallet = require("./Wallet_EC.js")
 const AppConfig = require("./AppConfig.js")
 const chalk = require('chalk');
 var port
