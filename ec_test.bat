@@ -1,3 +1,5 @@
+::Test for EC version of wallet and ATM
+
 ::start nodes
 start call node source/Node.js 5000 INIT &
 start call node source/Node.js 5001 http://localhost:5000 &

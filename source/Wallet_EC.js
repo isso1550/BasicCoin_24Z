@@ -1,11 +1,3 @@
-/* 
-09.10 17:39 
-Mam problemy z asynchronnicznością JS - callbacki itd. Na razie wygląda na dzialające, ale nie wiem czy za bardzo nei 
-dopasowałem się do małego narazie problemu. Jeśli masz sugestie poprawek to napisz lub popraw!
-
-Warning: Before release consider changing method of obtaining wallet db path in connect_db (currently standarized to be in source)
-*/
-
 const Sqlite3 = require('sqlite3').verbose();
 const Crypto = require('crypto');
 const AppConfig = require('./AppConfig.js')
